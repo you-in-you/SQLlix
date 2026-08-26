@@ -504,7 +504,7 @@
           <code class="cheat-entry-name">${escapeHtml(item.name)}</code>
           <span class="cheat-entry-sum">${escapeHtml(item.summary || '')}</span>
         </div>
-        <button type="button" class="cheat-pin-mini${pinned ? ' on' : ''}" data-pin="${escapeHtml(item.id)}" title="Pin">${pinned ? '📌' : '📍'}</button>
+        <button type="button" class="cheat-pin-mini${pinned ? ' on' : ''}" data-pin="${escapeHtml(item.id)}" title="Pin">${neonPin(pinned)}</button>
       </div>`;
     }
 
@@ -567,7 +567,7 @@
           <div class="cheat-detail-head">
             <button type="button" class="btn btn-sm btn-ghost" id="cheatDetailClose">← Back</button>
             <span class="cheat-db-tag tag-${db.tag}">${escapeHtml(db.name)}</span>
-            <button type="button" class="pin-btn${pinned ? ' active' : ''}" id="cheatDetailPin">${pinned ? 'Pinned' : 'Pin'}</button>
+            <button type="button" class="pin-btn${pinned ? ' active' : ''}" id="cheatDetailPin">${neonPin(pinned, { label: pinned ? 'Pinned' : 'Pin' })}</button>
           </div>
           <h3 class="cheat-detail-title"><code>${escapeHtml(item.name)}</code></h3>
           <div class="cheat-detail-sub">${escapeHtml(cat.title)} · ${escapeHtml(item.summary || '')}</div>
@@ -613,6 +613,24 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
     }
+
+    /** Neon pin icon (replaces 📌/📍 stickers project-wide) */
+    function neonPin(on, opts) {
+      opts = opts || {};
+      const cls = 'neon-pin' + (on ? ' is-on' : '') + (opts.className ? ' ' + opts.className : '');
+      const label = opts.label != null ? opts.label : '';
+      const svg = `<svg class="${cls}" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+        <path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+          d="M15.2 3.3l5.5 5.5-3.4 1-6.2 6.2-1.6-1.6 6.2-6.2 1-3.4z"/>
+        <path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"
+          d="M9.2 14.8L4.5 21"/>
+        <path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
+          d="M12.8 11.2l-3.2 3.2"/>
+      </svg>`;
+      if (label === '') return svg;
+      return `<span class="neon-pin-wrap">${svg}<span class="neon-pin-label">${label}</span></span>`;
+    }
+
 
     let toastTimer;
     function showToast(msg, type = '') {
@@ -782,7 +800,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
             <input type="text" class="ck-name" placeholder="name" value="${escapeHtml(c.name)}" spellcheck="false" />
             <span style="color:var(--text-muted)">=</span>
             <input type="text" class="ck-value" placeholder="value" value="${escapeHtml(c.value)}" spellcheck="false" />
-            <button type="button" class="header-persist-btn${c.persist ? ' on' : ''} ck-persist" title="Survive refresh">${c.persist ? '📌' : '📍'}</button>
+            <button type="button" class="header-persist-btn${c.persist ? ' on' : ''} ck-persist" title="Survive refresh">${neonPin(!!c.persist)}</button>
             <button type="button" class="btn-remove-header ck-del" title="Remove">×</button>
           </div>
           <textarea class="cookie-mgr-note ck-note" placeholder="Note (optional)…">${escapeHtml(c.note || '')}</textarea>
@@ -876,7 +894,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           </div>
           <input class="header-value" type="text" placeholder="Value" value="${escapeHtml(h.value)}" data-idx="${idx}" data-field="value" spellcheck="false" />
           ${isCookie ? `<button type="button" class="header-cookie-manage" data-idx="${idx}" title="Manage cookies">Manage</button>` : ''}
-          <button type="button" class="header-persist-btn${pinOn ? ' on' : ''}" data-idx="${idx}" title="${pinOn ? 'Pinned — survives refresh' : 'Pin — keep after refresh'}">${pinOn ? '📌 Pin' : '📍 Pin'}</button>
+          <button type="button" class="header-persist-btn${pinOn ? ' on' : ''}" data-idx="${idx}" title="${pinOn ? 'Pinned — survives refresh' : 'Pin — keep after refresh'}">${neonPin(pinOn, { label: pinOn ? 'Pinned' : 'Pin' })}</button>
           <button class="btn-remove-header" data-idx="${idx}" title="Remove">×</button>`;
         headersList.appendChild(row);
       });
@@ -2158,7 +2176,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
             </span>
             <div class="history-actions">
               <button class="hist-btn pin-btn ${item.pinned ? 'pinned' : ''}" data-id="${item.id}" title="${item.pinned ? 'Unpin' : 'Pin'}">
-                ${item.pinned ? '★' : '☆'}
+                ${neonPin(!!item.pinned)}
               </button>
               <button class="hist-btn del-btn" data-id="${item.id}" title="Delete">✕</button>
             </div>
@@ -2571,6 +2589,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       });
       urlInput.addEventListener('input', () => {
         if (urlPreviewTip.classList.contains('show')) updateUrlPreview();
+        if (typeof updateUrlSuggest === 'function') updateUrlSuggest();
       });
       if (payloadInput) {
         payloadInput.addEventListener('input', () => {
@@ -2578,6 +2597,118 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           if (bodyPreviewTip && bodyPreviewTip.classList.contains('show')) updateBodyPreview();
         });
       }
+    }
+
+    // ===== URL History (browser-like autocomplete) =====
+    const URL_HIST_KEY = 'sqli-workbench-url-history-v1';
+    const URL_HIST_MAX = 80;
+    let urlSuggestIndex = -1;
+
+    function loadUrlHistory() {
+      try {
+        const raw = localStorage.getItem(URL_HIST_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr.filter((u) => typeof u === 'string' && u.trim()) : [];
+      } catch { return []; }
+    }
+    function saveUrlHistory(list) {
+      try { localStorage.setItem(URL_HIST_KEY, JSON.stringify(list || [])); } catch {}
+    }
+    /** Remember a URL after Send (survives refresh) */
+    function rememberUrl(url) {
+      url = String(url || '').trim();
+      if (!url) return;
+      let list = loadUrlHistory().filter((u) => u !== url);
+      list.unshift(url);
+      if (list.length > URL_HIST_MAX) list = list.slice(0, URL_HIST_MAX);
+      saveUrlHistory(list);
+    }
+    function removeUrlHistoryEntry(url) {
+      saveUrlHistory(loadUrlHistory().filter((u) => u !== url));
+    }
+    function hideUrlSuggest() {
+      const box = $('#urlSuggest');
+      if (box) box.classList.add('hidden');
+      urlSuggestIndex = -1;
+    }
+    function updateUrlSuggest() {
+      const box = $('#urlSuggest');
+      if (!box || !urlInput) return;
+      // Don't fight the $1 preview tooltip
+      if (urlPreviewTip && urlPreviewTip.classList.contains('show')) {
+        box.classList.add('hidden');
+        return;
+      }
+      const q = (urlInput.value || '').trim().toLowerCase();
+      let list = loadUrlHistory();
+      if (q) list = list.filter((u) => u.toLowerCase().includes(q));
+      list = list.slice(0, 12);
+      if (!list.length) {
+        box.classList.add('hidden');
+        box.innerHTML = '';
+        return;
+      }
+      urlSuggestIndex = -1;
+      box.innerHTML = list.map((u, i) => `
+        <div class="url-suggest-item" data-url="${escapeHtml(u)}" data-idx="${i}" role="option">
+          <span class="url-suggest-text" title="${escapeHtml(u)}">${escapeHtml(u)}</span>
+          <button type="button" class="url-suggest-del" data-del="${escapeHtml(u)}" title="Remove from history">×</button>
+        </div>
+      `).join('');
+      box.classList.remove('hidden');
+      box.querySelectorAll('.url-suggest-item').forEach((el) => {
+        el.addEventListener('mousedown', (e) => {
+          if (e.target.closest('.url-suggest-del')) return;
+          e.preventDefault();
+          urlInput.value = el.dataset.url || '';
+          hideUrlSuggest();
+          urlInput.focus();
+          if (typeof updateUrlPreview === 'function') updateUrlPreview();
+        });
+      });
+      box.querySelectorAll('.url-suggest-del').forEach((btn) => {
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          removeUrlHistoryEntry(btn.dataset.del);
+          updateUrlSuggest();
+        });
+      });
+    }
+    function moveUrlSuggest(delta) {
+      const box = $('#urlSuggest');
+      if (!box || box.classList.contains('hidden')) return;
+      const items = [...box.querySelectorAll('.url-suggest-item')];
+      if (!items.length) return;
+      urlSuggestIndex = Math.max(-1, Math.min(items.length - 1, urlSuggestIndex + delta));
+      items.forEach((el, i) => el.classList.toggle('active', i === urlSuggestIndex));
+      if (urlSuggestIndex >= 0) items[urlSuggestIndex].scrollIntoView({ block: 'nearest' });
+    }
+    if (urlInput) {
+      urlInput.addEventListener('focus', () => updateUrlSuggest());
+      urlInput.addEventListener('keydown', (e) => {
+        const box = $('#urlSuggest');
+        const open = box && !box.classList.contains('hidden');
+        if (e.key === 'ArrowDown' && open) {
+          e.preventDefault();
+          moveUrlSuggest(1);
+        } else if (e.key === 'ArrowUp' && open) {
+          e.preventDefault();
+          moveUrlSuggest(-1);
+        } else if (e.key === 'Enter' && open && urlSuggestIndex >= 0) {
+          const item = box.querySelector(`.url-suggest-item[data-idx="${urlSuggestIndex}"]`);
+          if (item) {
+            e.preventDefault();
+            urlInput.value = item.dataset.url || '';
+            hideUrlSuggest();
+          }
+        } else if (e.key === 'Escape' && open) {
+          hideUrlSuggest();
+        }
+      });
+      document.addEventListener('click', (e) => {
+        if (!e.target.closest('.url-input-wrap')) hideUrlSuggest();
+      });
     }
 
     // ===== Body Content-Type detection =====
@@ -4112,7 +4243,7 @@ img, video, canvas { opacity: 0.9; }
       const pinBtn = PIN_BTN_SEL[name] ? $(PIN_BTN_SEL[name]) : null;
       if (pinBtn) {
         pinBtn.classList.remove('active');
-        pinBtn.textContent = 'Pin';
+        pinBtn.innerHTML = neonPin(false, { label: 'Pin' });
       }
     }
 
@@ -4260,7 +4391,7 @@ img, video, canvas { opacity: 0.9; }
       const pinBtn = PIN_BTN_SEL[name] ? $(PIN_BTN_SEL[name]) : null;
       if (pinBtn) {
         pinBtn.classList.toggle('active', !!on);
-        pinBtn.textContent = on ? 'Pinned' : 'Pin';
+        pinBtn.innerHTML = neonPin(!!on, { label: on ? 'Pinned' : 'Pin' });
       }
       if (on) {
         if (!panel.style.left && !panel.style.right && !panel.style.top) {
@@ -5327,6 +5458,9 @@ img, video, canvas { opacity: 0.9; }
       const url = urlInput.value.trim();
       if (!url) { showToast('Enter a target URL'); urlInput.focus(); return; }
 
+      // Persist to URL history (browser-like suggestions)
+      if (typeof rememberUrl === 'function') rememberUrl(url);
+
       const { isBatch, payloads } = detectAttackMode();
 
       if (isBatch) {
@@ -5465,7 +5599,12 @@ img, video, canvas { opacity: 0.9; }
           cheatNav.detailId = null;
           cheatNav._ready = true;
         }
-        renderCheatSheet();
+        // Neon icons on static Pin buttons
+      ['payloadPinBtn','historyPinBtn','cheatPinBtn','proxyPinBtn'].forEach((id) => {
+        const b = document.getElementById(id);
+        if (b && typeof neonPin === 'function') b.innerHTML = neonPin(b.classList.contains('active'), { label: 'Pin' });
+      });
+      renderCheatSheet();
       }
     }
 
@@ -5519,7 +5658,7 @@ img, video, canvas { opacity: 0.9; }
               <span class="proxy-item-url" title="${escapeHtml(p.url)}">${escapeHtml(p.url)}</span>
               <div class="proxy-item-actions">
                 <button type="button" class="use-btn${isActive ? ' active' : ''}" data-act="use" title="Use for requests">${isActive ? 'Active' : 'Use'}</button>
-                <button type="button" class="pin-btn${p.pinned ? ' on' : ''}" data-act="pin" title="Pin">${p.pinned ? '📌' : '📍'}</button>
+                <button type="button" class="pin-btn${p.pinned ? ' on' : ''}" data-act="pin" title="Pin">${neonPin(!!p.pinned)}</button>
                 <button type="button" data-act="ping" title="Ping">Ping</button>
                 <button type="button" class="del-btn" data-act="del" title="Remove">×</button>
               </div>
