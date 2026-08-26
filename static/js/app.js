@@ -2499,6 +2499,9 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           : `<base href="${baseHref}">\n${htmlToRender}`;
       }
 
+      // Light JS-friendly cleanup so basic site UI scripts can run in the preview iframe
+      htmlToRender = prepareHtmlForRender(htmlToRender);
+
       // Night Protect — soft CSS and/or strict smart dimming
       if (state.nightProtectMode > 0) {
         htmlToRender = applyNightProtect(htmlToRender, state.nightProtectMode);
@@ -3177,6 +3180,37 @@ img, video, canvas { opacity: 0.9; }
         return html.replace(/<body[^>]*>/i, (m) => m + inject);
       }
       return inject + html;
+    }
+
+    /**
+     * Light prep so site UI JS has a better chance inside srcdoc iframe:
+     * - Strip CSP meta (often blocks inline/external scripts in preview)
+     * - Drop SRI integrity on script/link (mismatches if anything was rewritten)
+     * Does NOT strip or rewrite script bodies — we want menus/tabs/dropdowns to work.
+     */
+    function prepareHtmlForRender(html) {
+      if (!html) return html;
+      let out = String(html);
+      // <meta http-equiv="Content-Security-Policy" ...>
+      out = out.replace(
+        /<meta[^>]+http-equiv\s*=\s*["']?Content-Security-Policy["'][^>]*>/gi,
+        ''
+      );
+      // <meta name="Content-Security-Policy" ...> (rare)
+      out = out.replace(
+        /<meta[^>]+name\s*=\s*["']?Content-Security-Policy["'][^>]*>/gi,
+        ''
+      );
+      // Remove integrity= from script/link so browser won't block after base/proxy tweaks
+      out = out.replace(
+        /(<script\b[^>]*?)\s+integrity\s*=\s*(["'][^"']*["']|[^\s>]+)/gi,
+        '$1'
+      );
+      out = out.replace(
+        /(<link\b[^>]*?)\s+integrity\s*=\s*(["'][^"']*["']|[^\s>]+)/gi,
+        '$1'
+      );
+      return out;
     }
 
     /**

@@ -5,6 +5,7 @@ Acts as a transparent HTTP proxy so the frontend can send requests
 to arbitrary targets without browser Same-Origin Policy restrictions.
 """
 
+import re
 import time
 import traceback
 from urllib.parse import urlparse
@@ -12,7 +13,6 @@ from urllib.parse import urlparse
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
-from bs4 import BeautifulSoup
 import urllib3
 
 # Suppress InsecureRequestWarning when verify=False
@@ -26,48 +26,53 @@ DEFAULT_TIMEOUT = 30  # seconds
 MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5 MB soft
 
 
+def _base_href_for(target_url: str) -> str:
+    parsed = urlparse(target_url)
+    path = parsed.path or "/"
+    if not path.endswith("/") and "/" in path:
+        path = path.rsplit("/", 1)[0] + "/"
+    elif not path.endswith("/"):
+        path = path + "/"
+    return f"{parsed.scheme}://{parsed.netloc}{path}"
+
+
 def inject_base_tag(html: str, target_url: str) -> str:
     """
-    Parse HTML with BeautifulSoup and inject a <base href="..."> tag
-    so that relative CSS / JS / image paths resolve against the real target.
+    Inject <base href="..."> so relative CSS/JS/images resolve against the target.
+
+    Prefer lightweight regex injection to avoid BeautifulSoup rewriting <script>
+    bodies (which often breaks site UI JS). Fall back to BS only when needed.
     """
     try:
-        parsed = urlparse(target_url)
-        # Base should be origin + directory of the path
-        path = parsed.path
-        if not path.endswith("/") and "/" in path:
-            # Strip the last segment (file) to get the directory
-            path = path.rsplit("/", 1)[0] + "/"
-        elif not path.endswith("/"):
-            path = path + "/"
-        base_href = f"{parsed.scheme}://{parsed.netloc}{path}"
+        base_href = _base_href_for(target_url)
+        base_tag = f'<base href="{base_href}">'
 
-        soup = BeautifulSoup(html, "html.parser")
+        # Drop existing base tags (good enough for preview)
+        html_wo_base = re.sub(
+            r"<base\b[^>]*/?>",
+            "",
+            html,
+            flags=re.IGNORECASE,
+        )
 
-        # Ensure we have a <head>
-        if soup.head is None:
-            if soup.html is None:
-                # Completely malformed / plain text — wrap it
-                return f'<html><head><base href="{base_href}"></head><body>{html}</body></html>'
-            head = soup.new_tag("head")
-            soup.html.insert(0, head)
-        else:
-            head = soup.head
+        # Prefer injecting right after <head ...>
+        head_match = re.search(r"<head\b[^>]*>", html_wo_base, flags=re.IGNORECASE)
+        if head_match:
+            i = head_match.end()
+            return html_wo_base[:i] + "\n" + base_tag + html_wo_base[i:]
 
-        # Remove any existing <base> tags to avoid conflicts
-        for existing_base in head.find_all("base"):
-            existing_base.decompose()
+        # No <head>: insert after <html> or wrap
+        html_match = re.search(r"<html\b[^>]*>", html_wo_base, flags=re.IGNORECASE)
+        if html_match:
+            i = html_match.end()
+            return (
+                html_wo_base[:i]
+                + f"\n<head>{base_tag}</head>"
+                + html_wo_base[i:]
+            )
 
-        base_tag = soup.new_tag("base", href=base_href)
-        # Insert as the first child of <head>
-        if head.contents:
-            head.insert(0, base_tag)
-        else:
-            head.append(base_tag)
-
-        return str(soup)
+        return f"<html><head>{base_tag}</head><body>{html_wo_base}</body></html>"
     except Exception:
-        # If parsing fails for any reason, return original HTML
         return html
 
 
