@@ -2350,6 +2350,10 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           e.stopPropagation();
           menu.classList.toggle('hidden');
         });
+        // Scroll stays inside the menu — don't scroll the whole payload panel
+        menu.addEventListener('wheel', (e) => {
+          e.stopPropagation();
+        }, { passive: true });
         menu.querySelectorAll('button[data-ct]').forEach((btn) => {
           btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -3680,15 +3684,25 @@ img, video, canvas { opacity: 0.9; }
     const VPANEL_MAP = {
       payload: '#payloadWorkbench',
       history: '#historyPanel',
-      cheat: '#cheatPanel',
+      tools: '#toolsPanel',
+      cheatsheet: '#cheatSheetPanel',
+      proxy: '#proxyPanel',
       settings: '#settingsPanel',
       'adv-filter': '#advFilterPanel',
       'attack-dialog': '#attackNameDialog',
     };
-    const PINNABLE = new Set(['payload', 'history']);
+    const PINNABLE = new Set(['payload', 'history', 'cheatsheet', 'proxy']);
+    const PIN_BTN_SEL = {
+      payload: '#payloadPinBtn',
+      history: '#historyPinBtn',
+      cheatsheet: '#cheatPinBtn',
+      proxy: '#proxyPinBtn',
+    };
     const PIN_DEFAULTS = {
       payload: { top: '80px', right: '24px', width: '420px', height: '420px' },
       history: { top: '72px', left: '16px', width: '360px', height: Math.min(window.innerHeight * 0.7, 620) + 'px' },
+      cheatsheet: { top: '72px', left: '10%', width: '480px', height: Math.min(window.innerHeight * 0.75, 640) + 'px' },
+      proxy: { top: '72px', left: '12%', width: '520px', height: Math.min(window.innerHeight * 0.75, 620) + 'px' },
     };
     const vpanelBackdrop = $('#vpanelBackdrop');
     let activeVPanel = null;
@@ -3729,7 +3743,7 @@ img, video, canvas { opacity: 0.9; }
       el.style.width = '';
       el.style.height = '';
       el.style.zIndex = '';
-      const pinBtn = name === 'payload' ? $('#payloadPinBtn') : $('#historyPinBtn');
+      const pinBtn = PIN_BTN_SEL[name] ? $(PIN_BTN_SEL[name]) : null;
       if (pinBtn) {
         pinBtn.classList.remove('active');
         pinBtn.textContent = 'Pin';
@@ -3875,22 +3889,27 @@ img, video, canvas { opacity: 0.9; }
     function setPanelPinned(name, on, defaults) {
       const panel = $(VPANEL_MAP[name]);
       if (!panel) return;
+      defaults = defaults || PIN_DEFAULTS[name] || {};
       panel.classList.toggle('pinned', !!on);
-      const pinBtn = name === 'payload' ? $('#payloadPinBtn') : $('#historyPinBtn');
+      const pinBtn = PIN_BTN_SEL[name] ? $(PIN_BTN_SEL[name]) : null;
       if (pinBtn) {
         pinBtn.classList.toggle('active', !!on);
         pinBtn.textContent = on ? 'Pinned' : 'Pin';
       }
       if (on) {
         if (!panel.style.left && !panel.style.right && !panel.style.top) {
-          panel.style.top = defaults.top;
+          panel.style.top = defaults.top || '80px';
           panel.style.left = defaults.left || 'auto';
           panel.style.right = defaults.right || 'auto';
-          panel.style.width = defaults.width;
-          panel.style.height = defaults.height;
+          panel.style.width = defaults.width || '420px';
+          panel.style.height = defaults.height || '420px';
         }
         if (vpanelBackdrop) vpanelBackdrop.classList.remove('open');
-        showToast(`${name === 'payload' ? 'Payload' : 'History'} pinned — drag & resize`, 'success');
+        const label = name === 'payload' ? 'Payload'
+          : name === 'history' ? 'History'
+          : name === 'cheatsheet' ? 'Cheat Sheet'
+          : name === 'proxy' ? 'Proxy' : name;
+        showToast(`${label} pinned — drag & resize`, 'success');
       } else {
         panel.style.top = '';
         panel.style.left = '';
@@ -3974,34 +3993,29 @@ img, video, canvas { opacity: 0.9; }
       });
     }
 
-    const payloadPinBtn = $('#payloadPinBtn');
-    if (payloadPinBtn) {
-      payloadPinBtn.addEventListener('click', (e) => {
+    ['payload', 'history', 'cheatsheet', 'proxy'].forEach((name) => {
+      const sel = PIN_BTN_SEL[name];
+      const btn = sel ? $(sel) : null;
+      if (!btn) return;
+      btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        const panel = $('#payloadWorkbench');
-        setPanelPinned('payload', !panel.classList.contains('pinned'), {
-          top: '80px', right: '24px', width: '420px', height: '420px',
-        });
+        const panel = $(VPANEL_MAP[name]);
+        if (!panel) return;
+        setPanelPinned(name, !panel.classList.contains('pinned'), PIN_DEFAULTS[name]);
       });
-    }
-    const historyPinBtn = $('#historyPinBtn');
-    if (historyPinBtn) {
-      historyPinBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const panel = $('#historyPanel');
-        setPanelPinned('history', !panel.classList.contains('pinned'), {
-          top: '72px', left: '16px', width: '360px', height: Math.min(window.innerHeight * 0.7, 620) + 'px',
-        });
-      });
-    }
+    });
     setupPinnedDrag('#payloadWorkbench', '#payloadDragHandle');
     setupPinnedDrag('#historyPanel', '#historyDragHandle');
+    setupPinnedDrag('#cheatSheetPanel', '#cheatDragHandle');
+    setupPinnedDrag('#proxyPanel', '#proxyDragHandle');
     setupPinnedResize('#payloadWorkbench');
     setupPinnedResize('#historyPanel');
+    setupPinnedResize('#cheatSheetPanel');
+    setupPinnedResize('#proxyPanel');
 
     // Keep legacy names used elsewhere
     function setPayloadPinned(on) {
-      setPanelPinned('payload', on, { top: '80px', right: '24px', width: '420px', height: '420px' });
+      setPanelPinned('payload', on, PIN_DEFAULTS.payload);
     }
 
     // ===== Keyboard Shortcuts System =====
@@ -4010,7 +4024,7 @@ img, video, canvas { opacity: 0.9; }
     const DEFAULT_SHORTCUTS = {
       openPayload:   { label: 'Open Payload', group: 'Panels', key: 'p', ctrl: true, shift: false, alt: true },
       openHistory:   { label: 'Open History', group: 'Panels', key: 'h', ctrl: true, shift: false, alt: true },
-      openCheat:     { label: 'Open Cheat Sheet', group: 'Panels', key: 'k', ctrl: true, shift: false, alt: true },
+      openTools:     { label: 'Open Tools', group: 'Panels', key: 'k', ctrl: true, shift: false, alt: true },
       openSettings:  { label: 'Open Settings', group: 'Panels', key: 's', ctrl: true, shift: false, alt: true },
       sendRequest:   { label: 'Send Request', group: 'Actions', key: 'Enter', ctrl: true, shift: false, alt: false },
       closePanel:    { label: 'Close panel', group: 'Panels', key: 'Escape', ctrl: false, shift: false, alt: false },
@@ -4098,7 +4112,7 @@ img, video, canvas { opacity: 0.9; }
       switch (id) {
         case 'openPayload': toggleVPanel('payload'); break;
         case 'openHistory': toggleVPanel('history'); break;
-        case 'openCheat': toggleVPanel('cheat'); break;
+        case 'openTools': toggleVPanel('tools'); break;
         case 'openSettings': toggleVPanel('settings'); break;
         case 'sendRequest': if (typeof sendRequest === 'function') sendRequest(); break;
         case 'closePanel':
@@ -4360,7 +4374,7 @@ img, video, canvas { opacity: 0.9; }
         document.addEventListener('mouseup', onUp);
       });
     }
-    setupResize('#resizeCheat', '#cheatPanel', '--cheat-width', 160, 0.4);
+    setupResize('#resizeCheat', '#toolsPanel', '--cheat-width', 160, 0.4);
     setupResize('#resizeHistory', '#historyPanel', '--history-width', 200, 0.55);
 
     // ===== Response minimize / History focus =====
@@ -4739,6 +4753,8 @@ img, video, canvas { opacity: 0.9; }
       if (['POST', 'PUT', 'PATCH'].includes(method)) {
         body.post_data = postBody || '';
       }
+      const activeProxy = typeof getActiveProxyUrl === 'function' ? getActiveProxyUrl() : '';
+      if (activeProxy) body.proxy = activeProxy;
       let respData = null;
       try {
         const apiBase = (window.location.port === '5000') ? '' : 'http://127.0.0.1:5000';
@@ -4748,6 +4764,9 @@ img, video, canvas { opacity: 0.9; }
           body: JSON.stringify(body),
         });
         const data = await res.json();
+        if (data.proxy_stats && typeof applyServerProxyStats === 'function') {
+          applyServerProxyStats(data.proxy_stats);
+        }
         if (!res.ok || data.error) {
           respData = {
             status: data.status_code || 0,
@@ -5000,6 +5019,275 @@ img, video, canvas { opacity: 0.9; }
       }
     });
 
+    // ===== Tools tabs + Proxy manager =====
+    const PROXY_LS_KEY = 'sqli-workbench-proxies-v1';
+    let proxyState = {
+      items: [],       // { id, url, note, pinned, bytesIn, bytesOut, lastPingMs, lastPingOk, lastPingAt }
+      activeId: null,
+    };
+    let proxyPingTimer = null;
+
+    function apiBaseUrl() {
+      return (window.location.port === '5000') ? '' : 'http://127.0.0.1:5000';
+    }
+
+    function loadProxyState() {
+      try {
+        const raw = localStorage.getItem(PROXY_LS_KEY);
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        if (data && Array.isArray(data.items)) {
+          proxyState.items = data.items;
+          proxyState.activeId = data.activeId || null;
+        }
+      } catch { /* ignore */ }
+    }
+
+    function saveProxyState() {
+      try {
+        localStorage.setItem(PROXY_LS_KEY, JSON.stringify({
+          items: proxyState.items,
+          activeId: proxyState.activeId,
+        }));
+      } catch { /* ignore */ }
+    }
+
+    function formatBytes(n) {
+      n = Math.max(0, Number(n) || 0);
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      return (n / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    function getActiveProxy() {
+      if (!proxyState.activeId) return null;
+      return proxyState.items.find((p) => p.id === proxyState.activeId) || null;
+    }
+
+    function getActiveProxyUrl() {
+      const p = getActiveProxy();
+      return p ? p.url : '';
+    }
+
+    function applyServerProxyStats(stats) {
+      if (!stats || !stats.proxy) return;
+      const item = proxyState.items.find((p) => p.url === stats.proxy);
+      if (!item) return;
+      if (typeof stats.bytes_sent === 'number') item.bytesOut = stats.bytes_sent;
+      if (typeof stats.bytes_recv === 'number') item.bytesIn = stats.bytes_recv;
+      saveProxyState();
+      updateProxyToolbar();
+      renderProxyList();
+    }
+
+    /** Open a tool panel from the Tools picker: close picker, open float panel */
+    function openToolFromPicker(toolName) {
+      if (!VPANEL_MAP[toolName]) return;
+      // Close tools list drawer without unpinning other pinned tools
+      const toolsEl = $('#toolsPanel');
+      if (toolsEl) toolsEl.classList.remove('open');
+      openVPanel(toolName);
+      if (toolName === 'proxy') {
+        renderProxyList();
+        updateProxyToolbar();
+      }
+      if (toolName === 'cheatsheet' && typeof renderCheatSheet === 'function') {
+        renderCheatSheet();
+      }
+    }
+
+    function updateProxyToolbar() {
+      const active = getActiveProxy();
+      const dot = $('#proxyStatusDot');
+      const label = $('#proxyActiveLabel');
+      const pingEl = $('#proxyPingMs');
+      const outEl = $('#proxyBytesOut');
+      const inEl = $('#proxyBytesIn');
+      if (label) label.textContent = active ? active.url : 'Direct (no proxy)';
+      if (outEl) outEl.textContent = formatBytes(active ? active.bytesOut : 0);
+      if (inEl) inEl.textContent = formatBytes(active ? active.bytesIn : 0);
+      if (pingEl) {
+        if (active && active.lastPingMs != null) {
+          pingEl.textContent = active.lastPingOk === false
+            ? `${active.lastPingMs}ms ✗`
+            : `${active.lastPingMs}ms`;
+        } else {
+          pingEl.textContent = active ? '—' : '';
+        }
+      }
+      if (dot) {
+        dot.classList.remove('ok', 'bad', 'pending');
+        if (!active) return;
+        if (active.lastPingOk === true) dot.classList.add('ok');
+        else if (active.lastPingOk === false) dot.classList.add('bad');
+        else dot.classList.add('pending');
+      }
+    }
+
+    function renderProxyList() {
+      const list = $('#proxyList');
+      if (!list) return;
+      const items = [...proxyState.items].sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return (b.lastPingAt || 0) - (a.lastPingAt || 0);
+      });
+      if (!items.length) {
+        list.innerHTML = '<div class="proxy-empty">No proxies yet. Add Burp (<code>http://127.0.0.1:8080</code>) or any HTTP proxy.</div>';
+        return;
+      }
+      list.innerHTML = items.map((p) => {
+        const isActive = p.id === proxyState.activeId;
+        const pingTxt = p.lastPingMs != null
+          ? (p.lastPingOk === false ? `${p.lastPingMs}ms fail` : `${p.lastPingMs}ms`)
+          : 'not pinged';
+        return `
+          <div class="proxy-item${isActive ? ' active' : ''}${p.pinned ? ' pinned' : ''}" data-id="${p.id}">
+            <div class="proxy-item-top">
+              <span class="proxy-item-url" title="${escapeHtml(p.url)}">${escapeHtml(p.url)}</span>
+              <div class="proxy-item-actions">
+                <button type="button" class="use-btn${isActive ? ' active' : ''}" data-act="use" title="Use for requests">${isActive ? 'Active' : 'Use'}</button>
+                <button type="button" class="pin-btn${p.pinned ? ' on' : ''}" data-act="pin" title="Pin">${p.pinned ? '📌' : '📍'}</button>
+                <button type="button" data-act="ping" title="Ping">Ping</button>
+                <button type="button" class="del-btn" data-act="del" title="Remove">×</button>
+              </div>
+            </div>
+            ${p.note ? `<div class="proxy-item-note">${escapeHtml(p.note)}</div>` : ''}
+            <div class="proxy-item-meta">
+              <span>↑ ${formatBytes(p.bytesOut || 0)}</span>
+              <span>↓ ${formatBytes(p.bytesIn || 0)}</span>
+              <span>${pingTxt}</span>
+            </div>
+          </div>`;
+      }).join('');
+
+      list.querySelectorAll('.proxy-item').forEach((el) => {
+        const id = el.dataset.id;
+        el.querySelectorAll('button[data-act]').forEach((btn) => {
+          btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const act = btn.dataset.act;
+            const item = proxyState.items.find((x) => x.id === id);
+            if (!item) return;
+            if (act === 'use') {
+              proxyState.activeId = proxyState.activeId === id ? null : id;
+              saveProxyState();
+              renderProxyList();
+              updateProxyToolbar();
+              if (proxyState.activeId) pingProxy(item, true);
+              showToast(proxyState.activeId ? 'Proxy active' : 'Direct mode', 'success');
+            } else if (act === 'pin') {
+              item.pinned = !item.pinned;
+              saveProxyState();
+              renderProxyList();
+            } else if (act === 'ping') {
+              await pingProxy(item, true);
+            } else if (act === 'del') {
+              if (!confirm('Remove this proxy from the list?')) return;
+              proxyState.items = proxyState.items.filter((x) => x.id !== id);
+              if (proxyState.activeId === id) proxyState.activeId = null;
+              saveProxyState();
+              renderProxyList();
+              updateProxyToolbar();
+            }
+          });
+        });
+      });
+    }
+
+    async function pingProxy(item, showToastOnFail) {
+      if (!item || !item.url) return;
+      const dot = $('#proxyStatusDot');
+      if (dot && proxyState.activeId === item.id) {
+        dot.classList.remove('ok', 'bad');
+        dot.classList.add('pending');
+      }
+      try {
+        const res = await fetch(`${apiBaseUrl()}/api/proxy/ping`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ proxy: item.url }),
+        });
+        const data = await res.json();
+        item.lastPingMs = data.latency_ms != null ? data.latency_ms : null;
+        item.lastPingOk = !!data.ok;
+        item.lastPingAt = Date.now();
+        if (data.proxy_stats) applyServerProxyStats(data.proxy_stats);
+        saveProxyState();
+        updateProxyToolbar();
+        renderProxyList();
+        if (!data.ok && showToastOnFail) {
+          showToast(data.error || 'Proxy ping failed');
+        }
+      } catch (err) {
+        item.lastPingOk = false;
+        item.lastPingMs = null;
+        item.lastPingAt = Date.now();
+        saveProxyState();
+        updateProxyToolbar();
+        renderProxyList();
+        if (showToastOnFail) showToast('Backend unreachable for proxy ping');
+      }
+    }
+
+    function startProxyPingLoop() {
+      if (proxyPingTimer) clearInterval(proxyPingTimer);
+      proxyPingTimer = setInterval(() => {
+        const active = getActiveProxy();
+        if (active) pingProxy(active, false);
+      }, 15000);
+    }
+
+    function bindToolsAndProxyUI() {
+      $$('[data-open-tool]').forEach((btn) => {
+        btn.addEventListener('click', () => openToolFromPicker(btn.dataset.openTool));
+      });
+      const addBtn = $('#proxyAddBtn');
+      if (addBtn) {
+        addBtn.addEventListener('click', () => {
+          let url = ($('#proxyUrlInput')?.value || '').trim();
+          const note = ($('#proxyNoteInput')?.value || '').trim();
+          if (!url) {
+            showToast('Enter proxy URL');
+            return;
+          }
+          if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url)) url = 'http://' + url;
+          if (proxyState.items.some((p) => p.url === url)) {
+            showToast('Proxy already in list');
+            return;
+          }
+          const item = {
+            id: 'px-' + Date.now().toString(36),
+            url,
+            note,
+            pinned: false,
+            bytesIn: 0,
+            bytesOut: 0,
+            lastPingMs: null,
+            lastPingOk: null,
+            lastPingAt: 0,
+          };
+          proxyState.items.push(item);
+          saveProxyState();
+          if ($('#proxyUrlInput')) $('#proxyUrlInput').value = '';
+          if ($('#proxyNoteInput')) $('#proxyNoteInput').value = '';
+          renderProxyList();
+          showToast('Proxy added', 'success');
+          pingProxy(item, false);
+        });
+      }
+      const pingNow = $('#proxyPingNowBtn');
+      if (pingNow) {
+        pingNow.addEventListener('click', () => {
+          const active = getActiveProxy();
+          if (!active) {
+            showToast('No active proxy');
+            return;
+          }
+          pingProxy(active, true);
+        });
+      }
+    }
+
     // ===== Init =====
     function init() {
       initAppearanceControls();
@@ -5010,6 +5298,11 @@ img, video, canvas { opacity: 0.9; }
       syncNpSettingsUI();
       bindNpSettingsUI();
       if (typeof syncNightProtectBtn === 'function') syncNightProtectBtn();
+
+      loadProxyState();
+      bindToolsAndProxyUI();
+      updateProxyToolbar();
+      startProxyPingLoop();
 
       renderShortcutsList();
       renderHeaders();
@@ -5023,7 +5316,7 @@ img, video, canvas { opacity: 0.9; }
       const hint = (id) => formatShortcut(shortcuts[id] || {});
       const np = $('#navPayloadBtn'); if (np) np.title = 'Payload (' + hint('openPayload') + ')';
       const nh = $('#navHistoryBtn'); if (nh) nh.title = 'History (' + hint('openHistory') + ')';
-      const nc = $('#navCheatBtn'); if (nc) nc.title = 'Cheat Sheet (' + hint('openCheat') + ')';
+      const nc = $('#navToolsBtn'); if (nc) nc.title = 'Tools (' + hint('openTools') + ')';
       const ns = $('#navSettingsBtn'); if (ns) ns.title = 'Settings (' + hint('openSettings') + ')';
       setInterval(() => {
         if (state.history.length && !state.attack.active) renderHistory();

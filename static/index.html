@@ -43,8 +43,8 @@
         <button type="button" class="nav-tool" id="navHistoryBtn" data-panel="history" title="Request History">
           History <span class="nav-badge hidden" id="historyBadge">0</span>
         </button>
-        <button type="button" class="nav-tool" id="navCheatBtn" data-panel="cheat" title="SQLi Cheat Sheet">
-          Cheat
+        <button type="button" class="nav-tool" id="navToolsBtn" data-panel="tools" title="Tools">
+          Tools
         </button>
         <button type="button" class="nav-tool" id="navSettingsBtn" data-panel="settings" title="Settings">
           Settings
@@ -309,16 +309,97 @@
     </div>
   </div>
 
-  <!-- ===== VIRTUAL PANEL: Cheat Sheet (right drawer) ===== -->
-  <div class="vpanel drawer-right" id="cheatPanel" data-panel="cheat">
+  <!-- ===== VIRTUAL PANEL: Tools picker (right drawer — list only) ===== -->
+  <div class="vpanel drawer-right tools-panel" id="toolsPanel" data-panel="tools">
     <div class="vpanel-header">
-      <h2>SQLi Cheat Sheet</h2>
+      <h2>Tools</h2>
       <div class="vpanel-header-actions">
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
     </div>
     <div class="vpanel-body">
+      <p class="tools-picker-hint">Pick a tool — it opens as a floating panel (pin &amp; resize supported).</p>
+      <div class="tools-picker-list" id="toolsPickerList">
+        <button type="button" class="tools-picker-item" data-open-tool="cheatsheet">
+          <span class="tools-picker-icon">⌘</span>
+          <span class="tools-picker-text">
+            <strong>Cheat Sheet</strong>
+            <small>SQLi payloads — multi-DB quick insert</small>
+          </span>
+          <span class="tools-picker-arrow">›</span>
+        </button>
+        <button type="button" class="tools-picker-item" data-open-tool="proxy">
+          <span class="tools-picker-icon">⇄</span>
+          <span class="tools-picker-text">
+            <strong>Proxy</strong>
+            <small>Upstream proxy list, pin, traffic, ping</small>
+          </span>
+          <span class="tools-picker-arrow">›</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== TOOL: Cheat Sheet (center float — pin / resize) ===== -->
+  <div class="vpanel float-center tool-float" id="cheatSheetPanel" data-panel="cheatsheet">
+    <div class="resize-grip n" data-resize="n"></div>
+    <div class="resize-grip s" data-resize="s"></div>
+    <div class="resize-grip e" data-resize="e"></div>
+    <div class="resize-grip w" data-resize="w"></div>
+    <div class="resize-grip ne" data-resize="ne"></div>
+    <div class="resize-grip nw" data-resize="nw"></div>
+    <div class="resize-grip se" data-resize="se"></div>
+    <div class="resize-grip sw" data-resize="sw"></div>
+    <div class="vpanel-header" id="cheatDragHandle">
+      <h2>Cheat Sheet</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn" id="cheatPinBtn" title="Pin panel">Pin</button>
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body">
       <div class="cheat-sheet-body" id="cheatSheetBody"></div>
+    </div>
+  </div>
+
+  <!-- ===== TOOL: Proxy (center float — pin / resize) ===== -->
+  <div class="vpanel float-center tool-float" id="proxyPanel" data-panel="proxy">
+    <div class="resize-grip n" data-resize="n"></div>
+    <div class="resize-grip s" data-resize="s"></div>
+    <div class="resize-grip e" data-resize="e"></div>
+    <div class="resize-grip w" data-resize="w"></div>
+    <div class="resize-grip ne" data-resize="ne"></div>
+    <div class="resize-grip nw" data-resize="nw"></div>
+    <div class="resize-grip se" data-resize="se"></div>
+    <div class="resize-grip sw" data-resize="sw"></div>
+    <div class="vpanel-header" id="proxyDragHandle">
+      <h2>Proxy</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn" id="proxyPinBtn" title="Pin panel">Pin</button>
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body" style="padding:12px 14px;">
+      <div class="proxy-toolbar">
+        <div class="proxy-active-row">
+          <span class="proxy-label">Active</span>
+          <span class="proxy-status-dot" id="proxyStatusDot" title="Ping status"></span>
+          <span class="proxy-active-name" id="proxyActiveLabel">Direct (no proxy)</span>
+          <span class="proxy-ping-ms" id="proxyPingMs"></span>
+        </div>
+        <div class="proxy-stats-row" id="proxyStatsRow">
+          <span class="proxy-stat" title="Bytes sent through active proxy">↑ <b id="proxyBytesOut">0 B</b></span>
+          <span class="proxy-stat" title="Bytes received through active proxy">↓ <b id="proxyBytesIn">0 B</b></span>
+          <button type="button" class="btn btn-sm btn-ghost" id="proxyPingNowBtn" title="Ping active proxy">Ping</button>
+        </div>
+      </div>
+      <div class="proxy-add-form">
+        <input type="text" id="proxyUrlInput" class="proxy-input" placeholder="http://127.0.0.1:8080" spellcheck="false" />
+        <input type="text" id="proxyNoteInput" class="proxy-input proxy-note" placeholder="Note (e.g. Burp)" spellcheck="false" />
+        <button type="button" class="btn btn-sm btn-primary" id="proxyAddBtn">Add</button>
+      </div>
+      <div class="proxy-hint">HTTP/HTTPS proxies (Burp, ZAP, …). Format: <code>http://host:port</code> or with auth <code>http://user:pass@host:port</code></div>
+      <div class="proxy-list" id="proxyList"></div>
     </div>
   </div>
 
