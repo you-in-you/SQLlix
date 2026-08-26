@@ -618,6 +618,17 @@
     .vpanel.tool-float .vpanel-body {
       padding: 12px 14px;
     }
+    /* Cheat sheet fills the float panel */
+    .vpanel#cheatSheetPanel .vpanel-body {
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .vpanel#cheatSheetPanel .cheat-sheet-body {
+      flex: 1;
+      min-height: 280px;
+    }
     .proxy-toolbar {
       display: flex;
       flex-direction: column;
@@ -2102,7 +2113,7 @@
       min-height: 0;
     }
 
-    /* Cheat Sheet */
+    /* Cheat Sheet — multi-view knowledge base */
     .cheat-sheet {
       width: var(--cheat-width);
       min-width: var(--cheat-width);
@@ -2110,23 +2121,111 @@
     }
     .cheat-sheet-body {
       flex: 1;
-      overflow-y: auto;
-      padding: 6px 0;
+      overflow: hidden;
+      padding: 0;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
     }
-    .cheat-category { margin-bottom: 2px; }
-    .cheat-category-title {
+    .cheat-view {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 12px 14px;
+      min-height: 0;
+    }
+    .cheat-search-row { margin-bottom: 10px; }
+    .cheat-search {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-primary);
       padding: 8px 12px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      outline: none;
+    }
+    .cheat-search:focus {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 0 1px rgba(0,229,255,0.2);
+    }
+    .cheat-section { margin-bottom: 14px; }
+    .cheat-section-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .cheat-count {
+      font-size: 10px;
+      font-family: var(--font-mono);
+      color: var(--accent-cyan);
+      background: rgba(0,229,255,0.1);
+      padding: 1px 6px;
+      border-radius: 999px;
+    }
+    .cheat-empty {
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 12px;
+      text-align: center;
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+    }
+    .cheat-db-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .cheat-db-card {
+      text-align: left;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      transition: all 0.15s ease;
+      font-family: var(--font-sans);
+    }
+    .cheat-db-card:hover {
+      border-color: rgba(0, 229, 255, 0.45);
+      box-shadow: 0 0 14px rgba(0, 229, 255, 0.12);
+    }
+    .cheat-db-card strong { font-size: 13px; }
+    .cheat-db-card small {
+      font-size: 10px;
+      color: var(--text-muted);
+      line-height: 1.3;
+    }
+    .cheat-nav-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .cheat-category { margin-bottom: 4px; }
+    .cheat-category-title {
+      padding: 8px 4px;
       font-size: 11px;
-      font-weight: 600;
+      font-weight: 700;
       color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.7px;
+      letter-spacing: 0.4px;
       cursor: pointer;
       display: flex;
       align-items: center;
       gap: 6px;
       user-select: none;
-      transition: color var(--transition);
     }
     .cheat-category-title:hover { color: var(--text-secondary); }
     .cheat-category-title .chevron {
@@ -2138,49 +2237,173 @@
     .cheat-category.collapsed .cheat-items { display: none; }
     .cheat-db-tag {
       font-size: 9px;
-      padding: 1px 5px;
-      border-radius: 3px;
-      margin-left: auto;
+      padding: 2px 6px;
+      border-radius: 4px;
       font-weight: 700;
       letter-spacing: 0.3px;
-    }
-    .tag-mysql { background: rgba(0,230,118,0.15); color: var(--accent); }
-    .tag-mssql { background: rgba(0,229,255,0.12); color: var(--accent-cyan); }
-    .tag-pgsql { background: rgba(255,171,64,0.15); color: var(--warning); }
-    .tag-oracle { background: rgba(255,82,82,0.12); color: var(--danger); }
-    .tag-sqlite { background: rgba(179,136,255,0.15); color: #b388ff; }
-    .tag-generic { background: rgba(160,160,160,0.12); color: var(--text-secondary); }
-
-    .cheat-items { padding: 0 8px 6px; }
-    .cheat-item {
-      background: var(--bg-tertiary);
-      border: 1px solid transparent;
-      border-radius: 4px;
-      padding: 7px 10px;
-      margin-bottom: 3px;
-      font-family: var(--font-mono);
-      font-size: 11.5px;
+      flex-shrink: 0;
+      background: rgba(160,160,160,0.12);
       color: var(--text-secondary);
+    }
+    .tag-mysql, .cheat-db-tag.tag-mysql { background: rgba(0,230,118,0.15); color: var(--accent); }
+    .tag-mssql, .cheat-db-tag.tag-mssql { background: rgba(0,229,255,0.12); color: var(--accent-cyan); }
+    .tag-pgsql, .cheat-db-tag.tag-pgsql { background: rgba(255,171,64,0.15); color: var(--warning); }
+    .tag-oracle, .cheat-db-tag.tag-oracle { background: rgba(255,82,82,0.12); color: var(--danger); }
+    .tag-sqlite, .cheat-db-tag.tag-sqlite { background: rgba(179,136,255,0.15); color: #b388ff; }
+    .tag-generic, .cheat-db-tag.tag-generic { background: rgba(160,160,160,0.12); color: var(--text-secondary); }
+
+    .cheat-items, .cheat-item-list, .cheat-pin-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 0 0 6px;
+    }
+    .cheat-entry {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
       cursor: pointer;
-      transition: all var(--transition);
+      transition: all 0.12s ease;
+    }
+    .cheat-entry:hover {
+      border-color: rgba(0, 229, 255, 0.4);
+      background: rgba(0, 229, 255, 0.05);
+    }
+    .cheat-entry.is-pinned { border-color: rgba(255, 217, 61, 0.35); }
+    .cheat-entry-main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 6px 8px;
+    }
+    .cheat-entry-name {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--accent-cyan);
       word-break: break-all;
-      line-height: 1.4;
-      position: relative;
     }
-    .cheat-item:hover {
+    .cheat-entry-sum {
+      font-size: 11px;
+      color: var(--text-muted);
+      width: 100%;
+    }
+    .cheat-pin-mini {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px 6px;
+      cursor: pointer;
+      flex-shrink: 0;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .cheat-pin-mini.on { color: #ffd93d; border-color: rgba(255,217,61,0.45); }
+
+    .cheat-detail-overlay {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      background: rgba(8, 8, 12, 0.72);
+      backdrop-filter: blur(2px);
+      display: flex;
+      flex-direction: column;
+      padding: 10px;
+      overflow: hidden;
+    }
+    .cheat-detail-overlay.hidden { display: none !important; }
+    .cheat-detail-card {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
       background: var(--bg-elevated);
-      border-color: var(--accent);
-      color: var(--accent);
+      border: 1px solid var(--border-light);
+      border-radius: 10px;
+      padding: 12px 14px;
+      box-shadow: var(--shadow);
     }
-    .cheat-item:active { transform: scale(0.98); }
-    .cheat-item .db-badge {
-      display: inline-block;
-      font-size: 9px;
-      padding: 0 4px;
-      border-radius: 2px;
-      margin-right: 4px;
-      vertical-align: middle;
-      opacity: 0.8;
+    .cheat-detail-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .cheat-detail-head .pin-btn { margin-left: auto; }
+    .cheat-detail-title {
+      margin: 0 0 4px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    .cheat-detail-title code {
+      font-family: var(--font-mono);
+      color: var(--accent-cyan);
+      font-size: 14px;
+    }
+    .cheat-detail-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+    .cheat-detail-desc {
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.45;
+      margin: 0 0 12px;
+    }
+    .cheat-detail-block { margin-bottom: 12px; }
+    .cheat-detail-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .cheat-pre {
+      margin: 0;
+      padding: 10px;
+      border-radius: 8px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-primary);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .cheat-payload-list { display: flex; flex-direction: column; gap: 6px; }
+    .cheat-payload-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+    }
+    .cheat-payload-row code {
+      flex: 1;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+      word-break: break-all;
+    }
+    .cheat-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+    .cheat-tag {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(0,229,255,0.3);
+      color: var(--accent-cyan);
+      background: rgba(0,229,255,0.08);
     }
 
     /* Work Area */

