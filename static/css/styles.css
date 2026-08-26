@@ -1611,20 +1611,33 @@
       background: rgba(255, 217, 61, 0.12);
       box-shadow: 0 0 10px rgba(255, 217, 61, 0.25);
     }
+    .body-ct-wrap {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .body-ct-wrap.hidden { display: none !important; }
     .body-ct-badge {
       font-size: 10px;
       font-family: var(--font-mono);
       font-weight: 700;
-      padding: 2px 8px;
+      padding: 3px 10px;
       border-radius: 999px;
       border: 1px solid rgba(0, 229, 255, 0.4);
       color: var(--accent-cyan);
       background: rgba(0, 229, 255, 0.1);
       box-shadow: 0 0 8px rgba(0, 229, 255, 0.15);
-      max-width: 160px;
+      max-width: 180px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .body-ct-badge:hover {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 12px rgba(0, 229, 255, 0.35);
     }
     .body-ct-badge.ct-json {
       border-color: rgba(0, 230, 118, 0.5);
@@ -1648,19 +1661,41 @@
       background: rgba(255, 82, 82, 0.1);
       box-shadow: 0 0 8px rgba(255, 82, 82, 0.2);
     }
-    .body-ct-select {
-      background: var(--bg-input);
-      color: var(--text-secondary);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 3px 8px;
-      font-size: 10px;
-      font-family: var(--font-mono);
-      outline: none;
-      cursor: pointer;
-      max-width: 150px;
+    .body-ct-menu {
+      position: absolute;
+      top: calc(100% + 6px);
+      left: 0;
+      z-index: 50;
+      min-width: 180px;
+      padding: 6px;
+      border-radius: 8px;
+      border: 1px solid var(--border-light);
+      background: var(--bg-elevated);
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
     }
-    .body-ct-select:focus { border-color: var(--accent-cyan); }
+    .body-ct-menu.hidden { display: none !important; }
+    .body-ct-menu button {
+      text-align: left;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-family: var(--font-mono);
+      padding: 6px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .body-ct-menu button:hover {
+      background: rgba(0, 229, 255, 0.1);
+      color: var(--accent-cyan);
+    }
+    .body-ct-menu button.active {
+      color: var(--accent-cyan);
+      background: rgba(0, 229, 255, 0.12);
+    }
     .body-ct-custom {
       background: var(--bg-input);
       color: var(--text-primary);
@@ -1673,6 +1708,10 @@
       outline: none;
     }
     .body-ct-custom:focus { border-color: var(--accent-cyan); }
+    .body-ct-custom.hidden { display: none !important; }
+    .vpanel.pinned.panel-front {
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 229, 255, 0.15);
+    }
 
     /* ===== Main Layout ===== */
     .main-layout {

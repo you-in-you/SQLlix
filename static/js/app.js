@@ -2248,55 +2248,64 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       return h && h.value.trim() ? h.value.trim() : '';
     }
 
+    // Body CT mode: 'auto' | mime string | 'custom'
+    let bodyCtMode = 'auto';
+
     function getBodyCtChoice() {
-      const sel = $('#bodyCtSelect');
-      const mode = sel ? sel.value : 'auto';
-      if (mode === 'custom') {
-        const custom = ($('#bodyCtCustom')?.value || '').trim();
-        return custom || 'text/plain';
+      if (bodyCtMode === 'custom') {
+        return ($('#bodyCtCustom')?.value || '').trim() || 'text/plain';
       }
-      if (mode === 'auto') {
+      if (bodyCtMode === 'auto') {
         const body = postBodyInput ? postBodyInput.value : '';
         return detectBodyContentType(body).mime;
       }
-      return mode;
+      return bodyCtMode;
     }
 
     function updateBodyCtUI() {
+      const wrap = $('#bodyCtWrap');
       const badge = $('#bodyCtBadge');
-      const sel = $('#bodyCtSelect');
+      const menu = $('#bodyCtMenu');
       const custom = $('#bodyCtCustom');
-      if (!badge) return;
+      if (!badge || !wrap) return;
       const body = postBodyInput ? postBodyInput.value : '';
       const det = detectBodyContentType(body);
       const configured = getConfiguredContentType();
-      const mode = sel ? sel.value : 'auto';
-      if (custom) custom.classList.toggle('hidden', mode !== 'custom');
 
-      badge.className = 'body-ct-badge';
+      // Hide entire CT UI when body is empty
       if (!det.mime) {
-        badge.textContent = 'empty';
-        badge.title = 'No body';
+        wrap.classList.add('hidden');
+        if (menu) menu.classList.add('hidden');
         return;
       }
+      wrap.classList.remove('hidden');
+      if (custom) custom.classList.toggle('hidden', bodyCtMode !== 'custom');
+
+      badge.className = 'body-ct-badge';
       let cls = 'ct-' + det.kind;
       let text = det.label;
-      if (mode === 'auto' && configured && configured.toLowerCase() !== det.mime.toLowerCase()) {
+      if (bodyCtMode === 'auto' && configured && configured.toLowerCase() !== det.mime.toLowerCase()) {
         cls = 'ct-conflict';
         text = det.label + ' ≠ hdr';
-        badge.title = `Detected: ${det.mime}\nSettings Content-Type: ${configured}\nAuto will keep Settings header. Pick a type to override.`;
-      } else if (mode !== 'auto') {
-        const chosen = mode === 'custom' ? (custom?.value || 'custom') : mode;
-        text = chosen.split('/').pop() || chosen;
-        badge.title = `Will send: ${chosen}\nDetected: ${det.mime}`;
-        if (chosen.toLowerCase().includes('json')) cls = 'ct-json';
-        else if (chosen.includes('form')) cls = 'ct-form';
-        else if (chosen.includes('xml')) cls = 'ct-xml';
+        badge.title = `Detected: ${det.mime}\nSettings Content-Type: ${configured}\nClick to override type`;
+      } else if (bodyCtMode !== 'auto') {
+        const chosen = bodyCtMode === 'custom' ? (custom?.value || 'custom') : bodyCtMode;
+        text = String(chosen).split('/').pop() || chosen;
+        badge.title = `Will send: ${chosen}\nDetected: ${det.mime}\nClick to change`;
+        if (String(chosen).toLowerCase().includes('json')) cls = 'ct-json';
+        else if (String(chosen).includes('form')) cls = 'ct-form';
+        else if (String(chosen).includes('xml')) cls = 'ct-xml';
       } else {
-        badge.title = `Detected: ${det.mime}` + (configured ? `\nSettings: ${configured}` : '\nWill auto-set Content-Type');
+        badge.title = `Detected: ${det.mime}` + (configured ? `\nSettings: ${configured}` : '\nWill auto-set Content-Type') + '\nClick to change';
       }
       badge.classList.add(cls);
       badge.textContent = text;
+
+      if (menu) {
+        menu.querySelectorAll('button[data-ct]').forEach((b) => {
+          b.classList.toggle('active', b.dataset.ct === bodyCtMode);
+        });
+      }
     }
 
     /**
@@ -2313,8 +2322,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       const hasBody = String(postBody || '').length > 0;
       if (!hasBody) return headers;
 
-      const sel = $('#bodyCtSelect');
-      const mode = sel ? sel.value : 'auto';
+      const mode = bodyCtMode || 'auto';
       const ctKey = Object.keys(headers).find((k) => k.toLowerCase() === 'content-type');
       const configured = ctKey ? headers[ctKey] : '';
 
@@ -2332,16 +2340,32 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       return headers;
     }
 
-    // Wire body CT controls
+    // Wire body CT controls (badge menu — no separate select)
     (function bindBodyCtUI() {
-      const sel = $('#bodyCtSelect');
+      const badge = $('#bodyCtBadge');
+      const menu = $('#bodyCtMenu');
       const custom = $('#bodyCtCustom');
-      if (sel) sel.addEventListener('change', updateBodyCtUI);
-      if (custom) custom.addEventListener('input', updateBodyCtUI);
-      if (postBodyInput) {
-        postBodyInput.addEventListener('input', updateBodyCtUI);
+      if (badge && menu) {
+        badge.addEventListener('click', (e) => {
+          e.stopPropagation();
+          menu.classList.toggle('hidden');
+        });
+        menu.querySelectorAll('button[data-ct]').forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            bodyCtMode = btn.dataset.ct || 'auto';
+            menu.classList.add('hidden');
+            updateBodyCtUI();
+            if (bodyCtMode === 'custom' && custom) {
+              custom.classList.remove('hidden');
+              custom.focus();
+            }
+          });
+        });
+        document.addEventListener('click', () => menu.classList.add('hidden'));
       }
-      // Initial
+      if (custom) custom.addEventListener('input', updateBodyCtUI);
+      if (postBodyInput) postBodyInput.addEventListener('input', updateBodyCtUI);
       setTimeout(updateBodyCtUI, 0);
     })();
 
@@ -3628,8 +3652,13 @@ img, video, canvas { opacity: 0.9; }
       'attack-dialog': '#attackNameDialog',
     };
     const PINNABLE = new Set(['payload', 'history']);
+    const PIN_DEFAULTS = {
+      payload: { top: '80px', right: '24px', width: '420px', height: '420px' },
+      history: { top: '72px', left: '16px', width: '360px', height: Math.min(window.innerHeight * 0.7, 620) + 'px' },
+    };
     const vpanelBackdrop = $('#vpanelBackdrop');
     let activeVPanel = null;
+    let panelZCounter = 460;
 
     function isPanelPinnedOpen(name) {
       const el = $(VPANEL_MAP[name]);
@@ -3642,15 +3671,30 @@ img, video, canvas { opacity: 0.9; }
       return [...PINNABLE].some((n) => isPanelPinnedOpen(n));
     }
 
+    /** Raise a pinned panel above others and mark nav active */
+    function focusPinnedPanel(name) {
+      const panel = $(VPANEL_MAP[name]);
+      if (!panel) return;
+      panelZCounter += 1;
+      panel.style.zIndex = String(panelZCounter);
+      $$('.vpanel.pinned').forEach((el) => el.classList.remove('panel-front'));
+      if (panel.classList.contains('pinned')) panel.classList.add('panel-front');
+      activeVPanel = name;
+      $$('.nav-tool').forEach((b) => b.classList.remove('active'));
+      const navBtn = document.querySelector(`.nav-tool[data-panel="${name}"]`);
+      if (navBtn) navBtn.classList.add('active');
+    }
+
     function unpinPanel(name) {
       const el = $(VPANEL_MAP[name]);
       if (!el) return;
-      el.classList.remove('pinned');
+      el.classList.remove('pinned', 'panel-front');
       el.style.top = '';
       el.style.left = '';
       el.style.right = '';
       el.style.width = '';
       el.style.height = '';
+      el.style.zIndex = '';
       const pinBtn = name === 'payload' ? $('#payloadPinBtn') : $('#historyPinBtn');
       if (pinBtn) {
         pinBtn.classList.remove('active');
@@ -3677,6 +3721,10 @@ img, video, canvas { opacity: 0.9; }
       activeVPanel = name;
       const navBtn = document.querySelector(`.nav-tool[data-panel="${name}"]`);
       if (navBtn) navBtn.classList.add('active');
+
+      if (panel.classList.contains('pinned')) {
+        focusPinnedPanel(name);
+      }
 
       if (vpanelBackdrop) {
         if (PINNABLE.has(name) && panel.classList.contains('pinned')) {
@@ -3740,7 +3788,36 @@ img, video, canvas { opacity: 0.9; }
     }
 
     $$('.nav-tool[data-panel]').forEach((btn) => {
-      btn.addEventListener('click', () => toggleVPanel(btn.dataset.panel));
+      btn.addEventListener('click', (e) => {
+        const name = btn.dataset.panel;
+        // Ctrl/Cmd+click on History or Payload → open pinned
+        if ((e.ctrlKey || e.metaKey) && PINNABLE.has(name)) {
+          openVPanel(name);
+          const panel = $(VPANEL_MAP[name]);
+          if (panel && !panel.classList.contains('pinned')) {
+            setPanelPinned(name, true, PIN_DEFAULTS[name] || {});
+          }
+          focusPinnedPanel(name);
+          return;
+        }
+        // Already pinned & open → just bring to front / activate
+        if (PINNABLE.has(name) && isPanelPinnedOpen(name)) {
+          focusPinnedPanel(name);
+          return;
+        }
+        toggleVPanel(name);
+      });
+    });
+
+    // Clicking a pinned panel body also brings it to front
+    PINNABLE.forEach((name) => {
+      const el = $(VPANEL_MAP[name]);
+      if (!el) return;
+      el.addEventListener('mousedown', () => {
+        if (el.classList.contains('pinned') && el.classList.contains('open')) {
+          focusPinnedPanel(name);
+        }
+      }, true);
     });
     $$('[data-close-panel]').forEach((btn) => {
       btn.addEventListener('click', (e) => {

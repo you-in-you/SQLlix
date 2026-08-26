@@ -193,18 +193,20 @@
       <div id="postBodySection" class="post-body-section" style="display:none; margin-top:12px;">
         <div class="payload-label" style="margin-bottom:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
           <span>Request Body (POST / PUT)</span>
-          <span class="body-ct-badge" id="bodyCtBadge" title="Detected body type">—</span>
-          <select id="bodyCtSelect" class="body-ct-select" title="Content-Type for this body">
-            <option value="auto">Auto (detect)</option>
-            <option value="application/json">JSON</option>
-            <option value="application/x-www-form-urlencoded">Form URL-encoded</option>
-            <option value="text/plain">Text</option>
-            <option value="text/xml">XML</option>
-            <option value="application/xml">application/xml</option>
-            <option value="multipart/form-data">multipart/form-data</option>
-            <option value="custom">Custom…</option>
-          </select>
-          <input type="text" id="bodyCtCustom" class="body-ct-custom hidden" placeholder="custom/type" spellcheck="false" />
+          <div class="body-ct-wrap hidden" id="bodyCtWrap">
+            <button type="button" class="body-ct-badge" id="bodyCtBadge" title="Click to change Content-Type">—</button>
+            <div class="body-ct-menu hidden" id="bodyCtMenu" role="menu">
+              <button type="button" data-ct="auto">Auto (detect)</button>
+              <button type="button" data-ct="application/json">JSON</button>
+              <button type="button" data-ct="application/x-www-form-urlencoded">Form URL-encoded</button>
+              <button type="button" data-ct="text/plain">Text</button>
+              <button type="button" data-ct="text/xml">XML</button>
+              <button type="button" data-ct="application/xml">application/xml</button>
+              <button type="button" data-ct="multipart/form-data">multipart/form-data</button>
+              <button type="button" data-ct="custom">Custom…</button>
+            </div>
+            <input type="text" id="bodyCtCustom" class="body-ct-custom hidden" placeholder="custom/type" spellcheck="false" />
+          </div>
         </div>
         <div class="body-input-wrap" style="position:relative;">
           <textarea id="postBodyInput" class="payload-textarea"
@@ -792,6 +794,7 @@
   </div>
 
   <div id="toast" class="toast"></div>
+
   <script src="js/app.js"></script>
 </body>
 </html>
