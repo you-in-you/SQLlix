@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SQLi Workbench</title>
+  <style>
+    :root {
+      --bg: #121212;
+      --panel: #181a1d;
+      --panel-2: #1d2024;
+      --input: #101214;
+      --border: #2a2a2a;
+      --border-hover: #3a3d40;
+      --text: #e8eaed;
+      --muted: #8b9198;
+      --green: #00e676;
+      --cyan: #00e5ff;
+      --orange: #ffab40;
+      --red: #ff5252;
+      --shadow: 0 10px 30px rgba(0,0,0,.22);
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
+
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+
+    .app {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      min-width: 980px;
+    }
+
+    /* ---------- Top navigation ---------- */
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      height: 52px;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--border);
+      background: #151515;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-width: 180px;
+      font-weight: 750;
+      letter-spacing: .2px;
+    }
+
+    .brand-mark {
+      width: 25px;
+      height: 25px;
+      display: grid;
+      place-items: center;
+      border: 1px solid rgba(0,230,118,.45);
+      border-radius: 6px;
+      color: var(--green);
+      font-weight: 900;
+      box-shadow: 0 0 14px rgba(0,230,118,.08);
+    }
+
+    .brand small {
+      color: var(--muted);
+      font-weight: 500;
+      margin-left: 2px;
+    }
+
+    .target-row {
+      display: grid;
+      grid-template-columns: 86px minmax(260px, 1fr) auto auto;
+      gap: 8px;
+      flex: 1;
+    }
+
+    select, input, textarea {
+      color: var(--text);
+      background: var(--input);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      outline: none;
+    }
+
+    select, input { height: 34px; padding: 0 10px; }
+
+    select:focus, input:focus, textarea:focus {
+      border-color: rgba(0,229,255,.55);
+      box-shadow: 0 0 0 2px rgba(0,229,255,.06);
+    }
+
+    .method {
+      color: var(--cyan);
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .btn {
+      height: 34px;
+      padding: 0 13px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel-2);
+      color: var(--text);
+      transition: .15s ease;
+    }
+
+    .btn:hover { border-color: var(--border-hover); background: #24282c; }
+    .btn:active { transform: translateY(1px); }
+
+    .btn-primary {
+      border-color: rgba(0,230,118,.45);
+      background: rgba(0,230,118,.10);
+      color: var(--green);
+      font-weight: 750;
+    }
+
+    .btn-primary:hover { background: rgba(0,230,118,.16); }
+
+    .spinner {
+      width: 13px;
+      height: 13px;
+      display: inline-block;
+      border: 2px solid rgba(0,230,118,.25);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: -2px;
+      margin-right: 7px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .icon-btn {
+      width: 34px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+    }
+
+    /* ---------- Headers drawer ---------- */
+    .headers-panel {
+      display: none;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      background: #151719;
+    }
+
+    .headers-panel.open { display: block; }
+
+    .headers-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 7px;
+    }
+
+    .header-row {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 7px;
+    }
+
+    .headers-panel input { width: 100%; }
+
+    /* ---------- Workbench ---------- */
+    .workbench {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 310px;
+      gap: 10px;
+      padding: 10px;
+      border-bottom: 1px solid var(--border);
+      min-height: 180px;
+      max-height: 260px;
+    }
+
+    .card {
+      border: 1px solid var(--border);
+      background: var(--panel);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      min-width: 0;
+    }
+
+    .card-header {
+      height: 38px;
+      padding: 0 11px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      color: #cbd0d5;
+      font-weight: 700;
+    }
+
+    .card-header .hint {
+      color: var(--muted);
+      font-weight: 500;
+      font-size: 11px;
+    }
+
+    .payload-card {
+      display: grid;
+      grid-template-rows: 38px 1fr 42px;
+    }
+
+    .payload-area {
+      width: 100%;
+      height: 100%;
+      min-height: 70px;
+      padding: 11px;
+      resize: none;
+      border: 0;
+      border-radius: 0;
+      background: var(--input);
+      font: 13px/1.55 "SFMono-Regular", Consolas, monospace;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px;
+      border-top: 1px solid var(--border);
+    }
+
+    .toolbar .spacer { flex: 1; }
+
+    .utility {
+      height: 29px;
+      padding: 0 9px;
+      font-size: 12px;
+    }
+
+    .cheatsheet {
+      display: grid;
+      grid-template-rows: 38px 1fr;
+      overflow: hidden;
+    }
+
+    .cheat-body {
+      overflow: auto;
+      padding: 8px;
+    }
+
+    .category {
+      margin-bottom: 10px;
+    }
+
+    .category-title {
+      padding: 5px 5px 4px;
+      color: var(--cyan);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .7px;
+    }
+
+    .snippet {
+      width: 100%;
+      padding: 7px 8px;
+      margin-bottom: 4px;
+      text-align: left;
+      color: #bfc4c9;
+      background: #151719;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      font: 11px/1.35 "SFMono-Regular", Consolas, monospace;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .snippet:hover {
+      border-color: rgba(0,229,255,.25);
+      color: var(--cyan);
+    }
+
+    /* ---------- Dashboard ---------- */
+    .dashboard {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 390px minmax(0, 1fr);
+      gap: 10px;
+      padding: 10px;
+    }
+
+    .history {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 40px 1fr;
+      overflow: hidden;
+    }
+
+    .history-list {
+      overflow: auto;
+      padding: 5px;
+    }
+
+    .history-item {
+      padding: 9px;
+      margin-bottom: 5px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: #151719;
+      cursor: pointer;
+    }
+
+    .history-item:hover {
+      background: #1b1e21;
+      border-color: var(--border-hover);
+    }
+
+    .history-item.active {
+      border-color: rgba(0,229,255,.35);
+      background: rgba(0,229,255,.05);
+    }
+
+    .history-top, .history-meta {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .history-top { margin-bottom: 5px; }
+    .request-id { color: var(--muted); font-family: monospace; }
+    .method-badge {
+      color: var(--cyan);
+      font-weight: 800;
+      font-size: 10px;
+    }
+
+    .status {
+      margin-left: auto;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 800;
+      font-family: monospace;
+    }
+
+    .s200 { color: var(--green); background: rgba(0,230,118,.09); }
+    .s400 { color: var(--orange); background: rgba(255,171,64,.10); }
+    .s500 { color: var(--red); background: rgba(255,82,82,.10); }
+
+    .payload-snippet {
+      color: #d2d6da;
+      font: 11px/1.4 "SFMono-Regular", Consolas, monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .history-meta {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .inspector {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: 40px 1fr;
+      overflow: hidden;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 2px;
+      border-bottom: 1px solid var(--border);
+      background: #151719;
+    }
+
+    .tab {
+      height: 40px;
+      padding: 0 13px;
+      color: var(--muted);
+      background: transparent;
+      border: 0;
+      border-bottom: 2px solid transparent;
+    }
+
+    .tab:hover { color: var(--text); }
+    .tab.active {
+      color: var(--cyan);
+      border-bottom-color: var(--cyan);
+    }
+
+    .tab-content {
+      min-height: 0;
+      overflow: hidden;
+      background: var(--input);
+    }
+
+    .tab-pane {
+      display: none;
+      height: 100%;
+      overflow: auto;
+    }
+
+    .tab-pane.active { display: block; }
+
+    .render-wrap {
+      height: 100%;
+      padding: 10px;
+    }
+
+    .preview {
+      width: 100%;
+      height: 100%;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: white;
+    }
+
+    .raw {
+      height: 100%;
+      margin: 0;
+      padding: 13px;
+      color: #cbd0d5;
+      font: 12px/1.55 "SFMono-Regular", Consolas, monospace;
+      white-space: pre-wrap;
+      overflow: auto;
+    }
+
+    .meta-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .meta-table th, .meta-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .meta-table th {
+      width: 180px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .meta-table td {
+      color: #dfe3e6;
+      font-family: "SFMono-Regular", Consolas, monospace;
+      word-break: break-word;
+    }
+
+    .empty {
+      height: 100%;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      text-align: center;
+      padding: 30px;
+    }
+
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      padding: 9px 12px;
+      border: 1px solid rgba(0,230,118,.3);
+      border-radius: 6px;
+      background: #18211d;
+      color: var(--green);
+      box-shadow: var(--shadow);
+      opacity: 0;
+      transform: translateY(8px);
+      pointer-events: none;
+      transition: .18s ease;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @media (max-width: 1150px) {
+      .workbench { grid-template-columns: minmax(0, 1fr) 260px; }
+      .dashboard { grid-template-columns: 320px minmax(0, 1fr); }
+    }
+  </style>
+</head>
+
+<body>
+<div class="app">
+
+  <!-- Top bar: target configuration and request controls -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">&gt;_</span>
+      <span>SQLi Workbench <small>v0.1</small></span>
+    </div>
+
+    <div class="target-row">
+      <select id="method" class="method" aria-label="HTTP method">
+        <option>GET</option>
+        <option>POST</option>
+      </select>
+
+      <input id="targetUrl" value="https://example.test/products?id=1"
+             placeholder="https://target.example/path?param=value"
+             aria-label="Target URL">
+
+      <button id="headersToggle" class="btn" type="button">Headers</button>
+      <button id="sendBtn" class="btn btn-primary" type="button">Send Request</button>
+    </div>
+  </header>
+
+  <!-- Collapsible custom HTTP headers -->
+  <section id="headersPanel" class="headers-panel">
+    <div class="headers-grid">
+      <div class="header-row">
+        <input value="User-Agent" aria-label="Header name">
+        <input value="SQLi-Workbench/0.1" aria-label="Header value">
+      </div>
+      <div class="header-row">
+        <input value="Cookie" aria-label="Header name">
+        <input placeholder="session=..." aria-label="Header value">
+      </div>
+      <div class="header-row">
+        <input value="Authorization" aria-label="Header name">
+        <input placeholder="Bearer ..." aria-label="Header value">
+      </div>
+      <div class="header-row">
+        <input placeholder="Custom header" aria-label="Header name">
+        <input placeholder="Value" aria-label="Header value">
+      </div>
+    </div>
+  </section>
+
+  <!-- Payload workbench -->
+  <section class="workbench">
+    <div class="card payload-card">
+      <div class="card-header">
+        <span>Payload Workbench</span>
+        <span class="hint">Manual testing • authorized targets only</span>
+      </div>
+
+      <textarea id="payload" class="payload-area"
+        spellcheck="false"
+        placeholder="Enter a test string or payload here..."></textarea>
+
+      <div class="toolbar">
+        <button id="encodeBtn" class="btn utility" type="button">URL Encode</button>
+        <button id="decodeBtn" class="btn utility" type="button">URL Decode</button>
+        <button id="clearBtn" class="btn utility" type="button">Clear Input</button>
+        <span class="spacer"></span>
+        <button id="injectBtn" class="btn btn-primary utility" type="button">Inject into Target</button>
+      </div>
+    </div>
+
+    <!-- Reference drawer. Strings are intentionally generic placeholders. -->
+    <aside class="card cheatsheet">
+      <div class="card-header">
+        <span>Cheat Sheet</span>
+        <span class="hint">click to copy</span>
+      </div>
+
+      <div class="cheat-body">
+        <div class="category">
+          <div class="category-title">Authentication Tests</div>
+          <button class="snippet" data-payload="TEST_AUTH_BOOLEAN_VARIANT">Boolean-condition test variant</button>
+          <button class="snippet" data-payload="TEST_AUTH_COMMENT_VARIANT">Comment-termination test variant</button>
+        </div>
+
+        <div class="category">
+          <div class="category-title">UNION Enumeration</div>
+          <button class="snippet" data-payload="TEST_COLUMN_COUNT_N">Column-count test placeholder</button>
+          <button class="snippet" data-payload="TEST_UNION_REFLECTIVE_VALUE">UNION reflective-value test</button>
+        </div>
+
+        <div class="category">
+          <div class="category-title">Error-Based</div>
+          <button class="snippet" data-payload="TEST_DB_ERROR_SIGNAL">Database error-signal test</button>
+          <button class="snippet" data-payload="TEST_TYPE_CONVERSION_ERROR">Type-conversion error test</button>
+        </div>
+
+        <div class="category">
+          <div class="category-title">Blind Timing</div>
+          <button class="snippet" data-payload="TEST_DELAY_THRESHOLD">Controlled delay threshold test</button>
+          <button class="snippet" data-payload="TEST_DB_SPECIFIC_DELAY">DB-specific delay test placeholder</button>
+        </div>
+      </div>
+    </aside>
+  </section>
+
+  <!-- Main dashboard -->
+  <main class="dashboard">
+
+    <!-- Request history -->
+    <section class="card history">
+      <div class="card-header">
+        <span>Request History</span>
+        <span id="historyCount" class="hint">0 requests</span>
+      </div>
+      <div id="historyList" class="history-list">
+        <div id="emptyHistory" class="empty">No requests yet.<br>Send a request to populate history.</div>
+      </div>
+    </section>
+
+    <!-- Response inspector -->
+    <section class="card inspector">
+      <div class="tabs">
+        <button class="tab active" data-tab="rendered">Rendered View</button>
+        <button class="tab" data-tab="raw">Raw Response</button>
+        <button class="tab" data-tab="metadata">Headers &amp; Metadata</button>
+      </div>
+
+      <div class="tab-content">
+        <div id="rendered" class="tab-pane active">
+          <div class="render-wrap">
+            <iframe id="preview" class="preview" title="Rendered response preview"></iframe>
+          </div>
+        </div>
+
+        <div id="raw" class="tab-pane">
+          <pre id="rawResponse" class="raw"></pre>
+        </div>
+
+        <div id="metadata" class="tab-pane">
+          <table class="meta-table">
+            <tbody id="metaBody">
+              <tr><th>Status Code</th><td>—</td></tr>
+              <tr><th>Response Time</th><td>—</td></tr>
+              <tr><th>Content-Type</th><td>—</td></tr>
+              <tr><th>Cookies</th><td>—</td></tr>
+              <tr><th>Server</th><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" class="toast" role="status"></div>
+
+<script>
+  "use strict";
+
+  /*
+   * SQLi Workbench frontend state.
+   *
+   * The request function is deliberately mocked. Replace sendRequest()
+   * with a fetch() call to your Flask/FastAPI endpoint.
+   */
+  const state = {
+    history: [],
+    selectedId: null,
+    requestCounter: 0
+  };
+
+  const $ = (id) => document.getElementById(id);
+
+  const methodEl = $("method");
+  const targetUrlEl = $("targetUrl");
+  const payloadEl = $("payload");
+  const sendBtn = $("sendBtn");
+  const historyList = $("historyList");
+  const historyCount = $("historyCount");
+  const rawResponse = $("rawResponse");
+  const preview = $("preview");
+  const metaBody = $("metaBody");
+  const toast = $("toast");
+
+  function showToast(message) {
+    toast.textContent = message;
+    toast.classList.add("show");
+    clearTimeout(showToast.timer);
+    showToast.timer = setTimeout(() => toast.classList.remove("show"), 1500);
+  }
+
+  // URL encode/decode helpers.
+  function encodePayload() {
+    payloadEl.value = encodeURIComponent(payloadEl.value);
+    showToast("Payload URL encoded");
+  }
+
+  function decodePayload() {
+    try {
+      payloadEl.value = decodeURIComponent(payloadEl.value);
+      showToast("Payload URL decoded");
+    } catch {
+      showToast("Input is not valid URL encoding");
+    }
+  }
+
+  function clearPayload() {
+    payloadEl.value = "";
+    payloadEl.focus();
+  }
+
+  /*
+   * Inject the current payload into the URL's first query parameter.
+   * For POST requests, a real backend adapter would normally construct
+   * the request body instead.
+   */
+  function injectPayload() {
+    const payload = payloadEl.value;
+    if (!payload) {
+      showToast("Enter a payload first");
+      return;
+    }
+
+    try {
+      const url = new URL(targetUrlEl.value);
+      const firstKey = [...url.searchParams.keys()][0];
+
+      if (firstKey) {
+        url.searchParams.set(firstKey, url.searchParams.get(firstKey) + payload);
+      } else {
+        url.searchParams.set("input", payload);
+      }
+
+      targetUrlEl.value = url.toString();
+      showToast("Payload injected into target");
+    } catch {
+      showToast("Invalid target URL");
+    }
+  }
+
+  /*
+   * Render response safely inside an iframe.
+   *
+   * A <base> element is inserted so relative links/assets resolve against
+   * the target origin. The iframe uses srcdoc, so the response remains
+   * isolated from the main workbench document.
+   */
+  function renderResponse(html, targetUrl) {
+    const base = document.createElement("base");
+    base.href = targetUrl;
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html || "", "text/html");
+    doc.head.prepend(base);
+
+    preview.srcdoc = "<!doctype html>" + doc.documentElement.outerHTML;
+  }
+
+  function selectHistory(id) {
+    const item = state.history.find(x => x.id === id);
+    if (!item) return;
+
+    state.selectedId = id;
+
+    document.querySelectorAll(".history-item").forEach(el => {
+      el.classList.toggle("active", el.dataset.id === String(id));
+    });
+
+    methodEl.value = item.method;
+    targetUrlEl.value = item.url;
+    payloadEl.value = item.payload;
+
+    rawResponse.textContent = item.body;
+    renderResponse(item.body, item.url);
+
+    metaBody.innerHTML = `
+      <tr><th>Status Code</th><td>${escapeHtml(String(item.status))}</td></tr>
+      <tr><th>Response Time</th><td>${escapeHtml(String(item.time))} ms</td></tr>
+      <tr><th>Content-Type</th><td>${escapeHtml(item.contentType)}</td></tr>
+      <tr><th>Cookies</th><td>${escapeHtml(item.cookies || "—")}</td></tr>
+      <tr><th>Server</th><td>${escapeHtml(item.server || "—")}</td></tr>
+    `;
+  }
+
+  function appendHistory(item) {
+    state.history.unshift(item);
+
+    const empty = $("emptyHistory");
+    if (empty) empty.remove();
+
+    const el = document.createElement("div");
+    el.className = "history-item";
+    el.dataset.id = item.id;
+
+    const statusClass =
+      item.status >= 500 ? "s500" :
+      item.status >= 400 ? "s400" : "s200";
+
+    el.innerHTML = `
+      <div class="history-top">
+        <span class="request-id">#${String(item.id).padStart(3, "0")}</span>
+        <span class="method-badge">${escapeHtml(item.method)}</span>
+        <span class="status ${statusClass}">${item.status}</span>
+      </div>
+      <div class="payload-snippet">${escapeHtml(item.payload || "(no payload)")}</div>
+      <div class="history-meta">
+        <span>${new Date(item.timestamp).toLocaleTimeString()}</span>
+        <span>•</span>
+        <span>${item.time} ms</span>
+      </div>
+    `;
+
+    el.addEventListener("click", () => selectHistory(item.id));
+    historyList.prepend(el);
+
+    historyCount.textContent =
+      `${state.history.length} request${state.history.length === 1 ? "" : "s"}`;
+
+    selectHistory(item.id);
+  }
+
+  function escapeHtml(value) {
+    return value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  /*
+   * Mock request layer.
+   *
+   * Backend integration example:
+   *
+   * const response = await fetch("/api/request", {
+   *   method: "POST",
+   *   headers: {"Content-Type": "application/json"},
+   *   body: JSON.stringify({
+   *     method, url, payload, headers
+   *   })
+   * });
+   *
+   * const result = await response.json();
+   */
+  async function sendRequest() {
+    const method = methodEl.value;
+    const url = targetUrlEl.value.trim();
+    const payload = payloadEl.value;
+
+    if (!url) {
+      showToast("Enter a target URL");
+      return;
+    }
+
+    sendBtn.disabled = true;
+    sendBtn.innerHTML = '<span class="spinner"></span>Sending';
+
+    const started = performance.now();
+
+    try {
+      // Simulated network latency.
+      await new Promise(resolve => setTimeout(resolve, 350 + Math.random() * 500));
+
+      const elapsed = Math.round(performance.now() - started);
+
+      const body = `<!doctype html>
+<html>
+<head><title>Mock Response</title></head>
+<body style="font-family:system-ui;padding:24px">
+  <h2>Mock Response</h2>
+  <p>This is a frontend placeholder response.</p>
+  <p><strong>Method:</strong> ${escapeHtml(method)}</p>
+  <p><strong>Target:</strong> ${escapeHtml(url)}</p>
+  <p><strong>Payload:</strong> ${escapeHtml(payload || "(none)")}</p>
+</body>
+</html>`;
+
+      appendHistory({
+        id: ++state.requestCounter,
+        method,
+        url,
+        payload,
+        status: 200,
+        time: elapsed,
+        contentType: "text/html; charset=utf-8",
+        cookies: "session=mock",
+        server: "mock-backend",
+        body,
+        timestamp: Date.now()
+      });
+
+      showToast("Request recorded");
+    } finally {
+      sendBtn.disabled = false;
+      sendBtn.textContent = "Send Request";
+    }
+  }
+
+  // Header drawer.
+  $("headersToggle").addEventListener("click", () => {
+    $("headersPanel").classList.toggle("open");
+  });
+
+  $("encodeBtn").addEventListener("click", encodePayload);
+  $("decodeBtn").addEventListener("click", decodePayload);
+  $("clearBtn").addEventListener("click", clearPayload);
+  $("injectBtn").addEventListener("click", injectPayload);
+  sendBtn.addEventListener("click", sendRequest);
+
+  // Cheat-sheet buttons copy their test string into the workbench.
+  document.querySelectorAll(".snippet").forEach(button => {
+    button.addEventListener("click", async () => {
+      payloadEl.value = button.dataset.payload;
+      payloadEl.focus();
+
+      try {
+        await navigator.clipboard.writeText(button.dataset.payload);
+        showToast("Test string copied");
+      } catch {
+        showToast("Test string loaded");
+      }
+    });
+  });
+
+  // Inspector tabs.
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      const target = tab.dataset.tab;
+
+      document.querySelectorAll(".tab").forEach(t =>
+        t.classList.toggle("active", t === tab)
+      );
+
+      document.querySelectorAll(".tab-pane").forEach(p =>
+        p.classList.toggle("active", p.id === target)
+      );
+    });
+  });
+
+  // Initial demo response, so the inspector isn't empty on first load.
+  appendHistory({
+    id: ++state.requestCounter,
+    method: "GET",
+    url: "https://example.test/products?id=1",
+    payload: "baseline-test",
+    status: 200,
+    time: 142,
+    contentType: "text/html; charset=utf-8",
+    cookies: "session=demo",
+    server: "example-server",
+    body: "<!doctype html><html><head><title>Demo</title></head><body style='font-family:system-ui;padding:24px'><h2>Response Inspector</h2><p>Send a request to replace this mock response.</p></body></html>",
+    timestamp: Date.now()
+  });
+</script>
+</body>
+</html>

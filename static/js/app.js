@@ -12,8 +12,8 @@
       activeHistoryId: null,
       nextId: 1,
       headers: [
-        { key: 'User-Agent', value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36', persist: true },
-        { key: 'Cookie', value: '', persist: false },
+        { key: 'User-Agent', value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36' },
+        { key: 'Cookie', value: '' },
       ],
       selectedBatchIds: [],
       collapsedBatches: {},
@@ -717,17 +717,16 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
         state.headers = arr.map(h => ({
           key: h.key || '',
           value: h.value || '',
-          persist: !!h.persist,
         }));
       } catch { /* ignore */ }
     }
 
     function savePersistedHeaders() {
       try {
-        // Save all headers that are marked persist (and keep structure of all for UX continuity of persist flags)
+        // Always persist headers until explicitly deleted
         const toSave = state.headers
-          .filter(h => h.persist && (h.key || '').trim())
-          .map(h => ({ key: h.key, value: h.value, persist: true }));
+          .filter(h => (h.key || '').trim())
+          .map(h => ({ key: h.key, value: h.value }));
         localStorage.setItem(HEADERS_LS_KEY, JSON.stringify(toSave));
       } catch { /* ignore */ }
     }
@@ -759,7 +758,6 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           name,
           value,
           active: m.active !== false,
-          persist: !!m.persist,
           note: m.note || '',
         });
       });
@@ -776,13 +774,16 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
     function openCookieManager() {
       const cookieHeader = state.headers.find((h) => (h.key || '').toLowerCase() === 'cookie');
       const list = parseCookieHeaderValue(cookieHeader ? cookieHeader.value : '');
-      state._cookieMgrList = list.length ? list : [{ name: '', value: '', active: true, persist: false, note: '' }];
+      state._cookieMgrList = list.length ? list : [{ name: '', value: '', active: true, note: '' }];
       renderCookieManager();
       $('#cookieMgrOverlay')?.classList.add('open');
+      // Expand settings panel while managing cookies
+      $('#settingsPanel')?.classList.add('cookie-mgr-open');
     }
 
     function closeCookieManager() {
       $('#cookieMgrOverlay')?.classList.remove('open');
+      $('#settingsPanel')?.classList.remove('cookie-mgr-open');
     }
 
     function renderCookieManager() {
@@ -794,16 +795,15 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
         return;
       }
       body.innerHTML = list.map((c, i) => `
-        <div class="cookie-mgr-item${c.active ? '' : ' off'}" data-i="${i}">
+        <div class="cookie-mgr-item${c.active ? '' : ' off'}${c.note && String(c.note).trim() ? ' has-note' : ''}" data-i="${i}" title="Click row (not fields) to toggle note">
           <div class="cookie-mgr-row">
             <input type="checkbox" class="ck-active" ${c.active ? 'checked' : ''} title="Active in request" />
             <input type="text" class="ck-name" placeholder="name" value="${escapeHtml(c.name)}" spellcheck="false" />
             <span style="color:var(--text-muted)">=</span>
             <input type="text" class="ck-value" placeholder="value" value="${escapeHtml(c.value)}" spellcheck="false" />
-            <button type="button" class="header-persist-btn${c.persist ? ' on' : ''} ck-persist" title="Survive refresh">${neonPin(!!c.persist)}</button>
             <button type="button" class="btn-remove-header ck-del" title="Remove">×</button>
           </div>
-          <textarea class="cookie-mgr-note ck-note" placeholder="Note (optional)…">${escapeHtml(c.note || '')}</textarea>
+          <textarea class="cookie-mgr-note ck-note hidden" placeholder="Note (optional)…">${escapeHtml(c.note || '')}</textarea>
         </div>
       `).join('');
 
@@ -817,16 +817,22 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           item.value = el.querySelector('.ck-value')?.value || '';
           item.note = el.querySelector('.ck-note')?.value || '';
           el.classList.toggle('off', !item.active);
+          el.classList.toggle('has-note', !!(item.note && item.note.trim()));
         };
         el.querySelector('.ck-active')?.addEventListener('change', sync);
         el.querySelector('.ck-name')?.addEventListener('input', sync);
         el.querySelector('.ck-value')?.addEventListener('input', sync);
         el.querySelector('.ck-note')?.addEventListener('input', sync);
-        el.querySelector('.ck-persist')?.addEventListener('click', () => {
-          state._cookieMgrList[i].persist = !state._cookieMgrList[i].persist;
-          renderCookieManager();
+        // Click on row (not inputs/buttons) toggles note
+        el.addEventListener('click', (e) => {
+          if (e.target.closest('input, textarea, button, select, a')) return;
+          const note = el.querySelector('.ck-note');
+          if (!note) return;
+          note.classList.toggle('hidden');
+          if (!note.classList.contains('hidden')) note.focus();
         });
-        el.querySelector('.ck-del')?.addEventListener('click', () => {
+        el.querySelector('.ck-del')?.addEventListener('click', (e) => {
+          e.stopPropagation();
           state._cookieMgrList.splice(i, 1);
           renderCookieManager();
         });
@@ -835,24 +841,19 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
 
     function saveCookieManager() {
       const list = state._cookieMgrList || [];
-      // Persist meta
-      const meta = loadCookieMeta();
+      const meta = {};
       list.forEach((c) => {
         if (!c.name) return;
-        meta[c.name] = { active: !!c.active, persist: !!c.persist, note: c.note || '' };
+        meta[c.name] = { active: !!c.active, note: c.note || '' };
       });
-      // Drop meta for removed names? keep old notes for names still in meta is ok
       saveCookieMeta(meta);
 
       const headerVal = cookieListToHeaderValue(list);
       let cookieHeader = state.headers.find((h) => (h.key || '').toLowerCase() === 'cookie');
-      // Header-level persist if any cookie is persist
-      const anyPersist = list.some((c) => c.persist && c.active);
       if (cookieHeader) {
         cookieHeader.value = headerVal;
-        if (anyPersist) cookieHeader.persist = true;
       } else if (headerVal) {
-        state.headers.push({ key: 'Cookie', value: headerVal, persist: anyPersist });
+        state.headers.push({ key: 'Cookie', value: headerVal });
       }
       savePersistedHeaders();
       renderHeaders();
@@ -866,7 +867,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       $('#cookieMgrSave')?.addEventListener('click', saveCookieManager);
       $('#cookieMgrAdd')?.addEventListener('click', () => {
         if (!state._cookieMgrList) state._cookieMgrList = [];
-        state._cookieMgrList.push({ name: '', value: '', active: true, persist: false, note: '' });
+        state._cookieMgrList.push({ name: '', value: '', active: true, note: '' });
         renderCookieManager();
       });
       $('#cookieMgrSelectAll')?.addEventListener('click', () => {
@@ -886,7 +887,6 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
         const row = document.createElement('div');
         const isCookie = (h.key || '').toLowerCase() === 'cookie';
         row.className = 'header-row' + (isCookie ? ' cookie-header-row' : '');
-        const pinOn = !!h.persist;
         row.innerHTML = `
           <div class="header-key-wrap">
             <input class="header-key" type="text" placeholder="Header name" value="${escapeHtml(h.key)}" data-idx="${idx}" data-field="key" spellcheck="false" autocomplete="off" />
@@ -894,7 +894,6 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           </div>
           <input class="header-value" type="text" placeholder="Value" value="${escapeHtml(h.value)}" data-idx="${idx}" data-field="value" spellcheck="false" />
           ${isCookie ? `<button type="button" class="header-cookie-manage" data-idx="${idx}" title="Manage cookies">Manage</button>` : ''}
-          <button type="button" class="header-persist-btn${pinOn ? ' on' : ''}" data-idx="${idx}" title="${pinOn ? 'Pinned — survives refresh' : 'Pin — keep after refresh'}">${neonPin(pinOn, { label: pinOn ? 'Pinned' : 'Pin' })}</button>
           <button class="btn-remove-header" data-idx="${idx}" title="Remove">×</button>`;
         headersList.appendChild(row);
       });
@@ -906,7 +905,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           if (!state.headers[i]) return;
           state.headers[i][field] = e.target.value;
           if (field === 'key') updateHeaderSuggest(e.target);
-          if (state.headers[i].persist) savePersistedHeaders();
+          savePersistedHeaders();
         });
         if (inp.classList.contains('header-key')) {
           inp.addEventListener('focus', (e) => updateHeaderSuggest(e.target));
@@ -952,17 +951,6 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       // Double-click Cookie value also opens manager
       headersList.querySelectorAll('.cookie-header-row .header-value').forEach((inp) => {
         inp.addEventListener('dblclick', () => openCookieManager());
-      });
-
-      headersList.querySelectorAll('.header-persist-btn').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const i = +btn.dataset.idx;
-          if (!state.headers[i]) return;
-          state.headers[i].persist = !state.headers[i].persist;
-          savePersistedHeaders();
-          renderHeaders();
-          showToast(state.headers[i].persist ? 'Header pinned — survives refresh' : 'Header unpinned', 'success');
-        });
       });
 
       headersList.querySelectorAll('.btn-remove-header').forEach((btn) => {
@@ -1035,7 +1023,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
     }
 
     addHeaderBtn.addEventListener('click', () => {
-      state.headers.push({ key: '', value: '', persist: false });
+      state.headers.push({ key: '', value: '' });
       renderHeaders();
       const rows = headersList.querySelectorAll('.header-row');
       const last = rows[rows.length - 1];
@@ -1046,11 +1034,12 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       }
     });
     clearHeadersBtn.addEventListener('click', () => {
-      // Keep pinned headers
-      state.headers = state.headers.filter(h => h.persist);
+      if (!state.headers.length) return;
+      if (!confirm('Remove all headers?')) return;
+      state.headers = [];
       savePersistedHeaders();
       renderHeaders();
-      showToast('Cleared non-pinned headers');
+      showToast('All headers cleared');
     });
     function openHeadersSettings() {
       openVPanel('settings');
@@ -1190,19 +1179,369 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       }
     }
 
-    // ===== Payload Utils =====
+    // ===== Payload Utils (line-by-line + selection-aware) =====
+    function mapPayloadText(text, fn) {
+      return String(text || '').split('\n').map((line) => {
+        try { return fn(line); } catch { return line; }
+      }).join('\n');
+    }
+    function applyToPayloadOrSelection(fn, okMsg) {
+      if (!payloadInput) return;
+      const start = payloadInput.selectionStart;
+      const end = payloadInput.selectionEnd;
+      const val = payloadInput.value;
+      if (start !== end) {
+        const sel = val.slice(start, end);
+        const out = mapPayloadText(sel, fn);
+        payloadInput.value = val.slice(0, start) + out + val.slice(end);
+        payloadInput.setSelectionRange(start, start + out.length);
+      } else {
+        if (!val) return;
+        payloadInput.value = mapPayloadText(val, fn);
+      }
+      if (typeof updatePayloadSummary === 'function') updatePayloadSummary();
+      if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
+      showToast(okMsg || 'Done', 'success');
+    }
     urlEncodeBtn.addEventListener('click', () => {
-      if (!payloadInput.value) return;
-      payloadInput.value = encodeURIComponent(payloadInput.value).replace(/%20/g, '+');
-      showToast('URL Encoded');
+      applyToPayloadOrSelection(
+        (line) => encodeURIComponent(line).replace(/%20/g, '+'),
+        'URL Encoded'
+      );
     });
     urlDecodeBtn.addEventListener('click', () => {
-      try {
-        payloadInput.value = decodeURIComponent(payloadInput.value.replace(/\+/g, ' '));
-        showToast('URL Decoded');
-      } catch { showToast('Decode failed'); }
+      applyToPayloadOrSelection(
+        (line) => decodeURIComponent(String(line).replace(/\+/g, ' ')),
+        'URL Decoded'
+      );
     });
     clearPayloadBtn.addEventListener('click', () => { payloadInput.value = ''; payloadInput.focus(); });
+
+    // ===== Converter (overlay on Payload) =====
+    let converterCodec = 'url';
+    const converterEncoders = {
+      url: {
+        enc: (s) => encodeURIComponent(s).replace(/%20/g, '+'),
+        dec: (s) => decodeURIComponent(String(s).replace(/\+/g, ' ')),
+      },
+      b64: {
+        enc: (s) => btoa(unescape(encodeURIComponent(s))),
+        dec: (s) => decodeURIComponent(escape(atob(s.trim()))),
+      },
+      hex: {
+        enc: (s) => Array.from(new TextEncoder().encode(s)).map(b => b.toString(16).padStart(2, '0')).join(''),
+        dec: (s) => {
+          const clean = String(s).replace(/[^0-9a-fA-F]/g, '');
+          if (!clean) return '';
+          const pairs = clean.match(/.{1,2}/g) || [];
+          const bytes = new Uint8Array(pairs.map(h => parseInt(h, 16)));
+          return new TextDecoder().decode(bytes);
+        },
+      },
+      html: {
+        enc: (s) => s.replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
+        dec: (s) => { const d = document.createElement('textarea'); d.innerHTML = s; return d.value; },
+      },
+      unicode: {
+        enc: (s) => Array.from(s).map(ch => {
+          const cp = ch.codePointAt(0);
+          return cp > 0xFFFF ? '\\u{' + cp.toString(16) + '}' : '\\u' + cp.toString(16).padStart(4, '0');
+        }).join(''),
+        dec: (s) => String(s).replace(/\\u\{([0-9a-fA-F]+)\}|\\u([0-9a-fA-F]{4})/g, (_, a, b) => {
+          return String.fromCodePoint(parseInt(a || b, 16));
+        }),
+      },
+      ascii: {
+        enc: (s) => Array.from(s).map(ch => ch.codePointAt(0)).join(' '),
+        dec: (s) => String(s).trim().split(/\s+/).filter(Boolean).map(n => String.fromCodePoint(parseInt(n, 10))).join(''),
+      },
+      rot13: {
+        enc: (s) => s.replace(/[A-Za-z]/g, (c) => {
+          const base = c <= 'Z' ? 65 : 97;
+          return String.fromCharCode((c.charCodeAt(0) - base + 13) % 26 + base);
+        }),
+        dec: null, // same as enc
+      },
+      reverse: {
+        enc: (s) => Array.from(s).reverse().join(''),
+        dec: null,
+      },
+    };
+    function runConverter(direction) {
+      const input = $('#converterInput');
+      const output = $('#converterOutput');
+      if (!input || !output) return;
+      const pair = converterEncoders[converterCodec];
+      if (!pair) return;
+      let fn = direction === 'dec' ? (pair.dec || pair.enc) : pair.enc;
+      if (!fn) return;
+      try {
+        const start = input.selectionStart;
+        const end = input.selectionEnd;
+        let source;
+        if (start !== end) {
+          // Only selected slice (like Payload Workbench)
+          source = input.value.slice(start, end);
+        } else {
+          source = input.value;
+        }
+        output.value = mapPayloadText(source, fn);
+      } catch (err) {
+        showToast('Convert failed: ' + (err.message || err));
+      }
+    }
+    function openConverter() {
+      const ov = $('#converterOverlay');
+      const panel = $('#payloadWorkbench');
+      if (!ov) return;
+      const input = $('#converterInput');
+      if (payloadInput && payloadInput.selectionStart !== payloadInput.selectionEnd) {
+        input.value = payloadInput.value.slice(payloadInput.selectionStart, payloadInput.selectionEnd);
+      } else if (input && !input.value && payloadInput) {
+        input.value = payloadInput.value;
+      }
+      panel?.classList.add('converter-open');
+      ov.classList.add('open');
+      setTimeout(() => input?.focus(), 50);
+    }
+    function closeConverter() {
+      $('#converterOverlay')?.classList.remove('open');
+      $('#payloadWorkbench')?.classList.remove('converter-open');
+    }
+    (function bindConverter() {
+      const btn = $('#converterBtn');
+      if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); openConverter(); });
+      $('#converterClose')?.addEventListener('click', closeConverter);
+      $$('#converterModes .conv-mode').forEach((b) => {
+        b.addEventListener('click', () => {
+          $$('#converterModes .conv-mode').forEach((x) => x.classList.remove('active'));
+          b.classList.add('active');
+          converterCodec = b.dataset.codec || 'url';
+        });
+      });
+      $('#converterEncode')?.addEventListener('click', () => runConverter('enc'));
+      $('#converterDecode')?.addEventListener('click', () => runConverter('dec'));
+      $('#converterFromPayload')?.addEventListener('click', () => {
+        const input = $('#converterInput');
+        if (!input || !payloadInput) return;
+        if (payloadInput.selectionStart !== payloadInput.selectionEnd) {
+          input.value = payloadInput.value.slice(payloadInput.selectionStart, payloadInput.selectionEnd);
+        } else {
+          input.value = payloadInput.value;
+        }
+      });
+      $('#converterSwap')?.addEventListener('click', () => {
+        const a = $('#converterInput');
+        const b = $('#converterOutput');
+        if (!a || !b) return;
+        const t0 = a.value;
+        a.value = b.value;
+        b.value = t0;
+      });
+      $('#converterToPayload')?.addEventListener('click', () => {
+        const out = ($('#converterOutput')?.value) ?? '';
+        if (!payloadInput) return;
+        const start = payloadInput.selectionStart;
+        const end = payloadInput.selectionEnd;
+        if (start !== end) {
+          payloadInput.value = payloadInput.value.slice(0, start) + out + payloadInput.value.slice(end);
+          payloadInput.setSelectionRange(start, start + out.length);
+        } else {
+          payloadInput.value = out;
+        }
+        if (typeof updatePayloadSummary === 'function') updatePayloadSummary();
+        if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
+        closeConverter();
+        showToast('Applied to Payload', 'success');
+      });
+      $('#converterAsLine')?.addEventListener('click', () => {
+        const out = ($('#converterOutput')?.value) ?? '';
+        if (!out || !payloadInput) return;
+        const cur = payloadInput.value || '';
+        payloadInput.value = cur && !cur.endsWith('\n') ? (cur + '\n' + out) : (cur + out);
+        if (typeof updatePayloadSummary === 'function') updatePayloadSummary();
+        if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
+        showToast('Appended as new line(s)', 'success');
+      });
+      $('#converterCopy')?.addEventListener('click', async () => {
+        const out = ($('#converterOutput')?.value) ?? '';
+        try {
+          await navigator.clipboard.writeText(out);
+          showToast('Copied', 'success');
+        } catch {
+          showToast('Copy failed');
+        }
+      });
+    })();
+
+    // ===== Char Tables (unified + search + copy pop) =====
+    const SQLI_HOT = new Set(["'", '"', '#', '-', '/', '*', '(', ')', ';', '=', ' ', '%', '_', '\\', ',', '|', '&', '<', '>', '`']);
+    function buildUnifiedCharRows() {
+      const rows = [];
+      // Printable ASCII 32-126
+      for (let i = 32; i <= 126; i++) {
+        const ch = String.fromCharCode(i);
+        const url = encodeURIComponent(ch).replace(/%20/g, '+');
+        rows.push({
+          char: ch === ' ' ? '␠' : ch,
+          rawChar: ch,
+          ascii: String(i),
+          url,
+          hex: i.toString(16).toUpperCase().padStart(2, '0'),
+          hot: SQLI_HOT.has(ch),
+        });
+      }
+      // Common SQLi multi-char tokens
+      const extras = ['-- ', '/*', '*/', '@@', '||', '&&', '0x', 'CHAR(', 'SLEEP(', 'WAITFOR', 'pg_sleep'];
+      extras.forEach((tok) => {
+        rows.push({
+          char: tok,
+          rawChar: tok,
+          ascii: Array.from(tok).map(c => c.codePointAt(0)).join(' '),
+          url: encodeURIComponent(tok).replace(/%20/g, '+'),
+          hex: Array.from(new TextEncoder().encode(tok)).map(b => b.toString(16).padStart(2, '0')).join(''),
+          hot: true,
+        });
+      });
+      return rows;
+    }
+    const UNIFIED_CHAR_ROWS = buildUnifiedCharRows();
+    let charTableFilter = '';
+
+    function renderCharTable() {
+      const panel = $('#charTablePanel');
+      const grid = $('#charTableGrid');
+      if (!panel || !grid) return;
+      const q = (charTableFilter || '').trim().toLowerCase();
+      const rows = UNIFIED_CHAR_ROWS.filter((r) => {
+        if (!q) return true;
+        return (
+          r.char.toLowerCase().includes(q) ||
+          r.rawChar.toLowerCase().includes(q) ||
+          r.ascii.includes(q) ||
+          r.url.toLowerCase().includes(q) ||
+          r.hex.toLowerCase().includes(q)
+        );
+      });
+      grid.innerHTML = rows.map((r, idx) => `
+        <button type="button" class="char-cell${r.hot ? ' sqli-hot' : ''}" data-idx="${idx}" data-char="${escapeHtml(r.rawChar)}" data-ascii="${escapeHtml(r.ascii)}" data-url="${escapeHtml(r.url)}" data-hex="${escapeHtml(r.hex)}" title="Click to copy…">
+          <span class="ch-char">${escapeHtml(r.char)}</span>
+          <span class="ch-enc-row">
+            <span class="ch-ascii">ASCII ${escapeHtml(r.ascii)}</span>
+            <span class="ch-enc">URL ${escapeHtml(r.url)}</span>
+          </span>
+        </button>
+      `).join('') || '<div class="cheat-empty">No matches</div>';
+      grid.querySelectorAll('.char-cell').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openCharCopyPop(btn);
+        });
+      });
+      panel.classList.remove('hidden');
+    }
+
+    function openCharCopyPop(btn) {
+      const pop = $('#charCopyPop');
+      const actions = $('#charCopyPopActions');
+      const title = $('#charCopyPopTitle');
+      if (!pop || !actions) return;
+      const ch = btn.dataset.char || '';
+      const ascii = btn.dataset.ascii || '';
+      const url = btn.dataset.url || '';
+      const hex = btn.dataset.hex || '';
+      if (title) title.textContent = 'Copy · ' + (ch === ' ' ? 'space' : ch);
+      const opts = [
+        { label: 'Character', val: ch },
+        { label: 'ASCII', val: ascii },
+        { label: 'URL encode', val: url },
+        { label: 'Hex', val: hex },
+      ];
+      actions.innerHTML = opts.map((o) =>
+        `<button type="button" data-val="${escapeHtml(o.val)}"><strong>${escapeHtml(o.label)}</strong> · <code>${escapeHtml(o.val)}</code></button>`
+      ).join('');
+      actions.querySelectorAll('button').forEach((b) => {
+        b.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            await navigator.clipboard.writeText(b.dataset.val || '');
+            showToast('Copied', 'success');
+          } catch { showToast('Copy failed'); }
+          pop.classList.add('hidden');
+        });
+      });
+      // Fixed position near cell (avoids clipped scroll areas)
+      const br = btn.getBoundingClientRect();
+      pop.classList.remove('hidden');
+      const pw = pop.offsetWidth || 200;
+      const ph = pop.offsetHeight || 160;
+      let top = br.top - ph - 8;
+      if (top < 8) top = br.bottom + 8;
+      let left = br.left;
+      if (left + pw > window.innerWidth - 8) left = window.innerWidth - pw - 8;
+      pop.style.top = top + 'px';
+      pop.style.left = Math.max(8, left) + 'px';
+    }
+
+    (function bindCharTable() {
+      const badge = $('#charTableBadge');
+      const panel = $('#charTablePanel');
+      if (badge && panel) {
+        badge.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const wrap = $('#charTableWrap');
+          if (!panel.classList.contains('hidden')) {
+            panel.classList.add('hidden');
+            wrap?.classList.remove('open');
+            $('#charCopyPop')?.classList.add('hidden');
+            return;
+          }
+          charTableFilter = ($('#charTableSearch')?.value) || '';
+          renderCharTable();
+          wrap?.classList.add('open');
+        });
+      }
+      $('#charTableClose')?.addEventListener('click', () => {
+        panel?.classList.add('hidden');
+        $('#charTableWrap')?.classList.remove('open');
+        $('#charCopyPop')?.classList.add('hidden');
+      });
+      $('#charCopyPopClose')?.addEventListener('click', () => {
+        $('#charCopyPop')?.classList.add('hidden');
+      });
+      $('#charTableSearch')?.addEventListener('input', (e) => {
+        charTableFilter = e.target.value || '';
+        renderCharTable();
+      });
+    })();
+
+    // Tools search / filter (history-style)
+    (function bindToolsFilter() {
+      const search = $('#toolsSearch');
+      const list = $('#toolsPickerList');
+      if (!list) return;
+      const apply = () => {
+        const q = (search?.value || '').trim().toLowerCase();
+        const activeChip = document.querySelector('#toolsChipRow .hf-chip.active');
+        const cat = activeChip?.dataset.toolsFilter || 'all';
+        list.querySelectorAll('.tools-list-item, .tools-picker-item').forEach((el) => {
+          const text = (el.textContent || '').toLowerCase();
+          const elCat = el.dataset.toolsCat || 'all';
+          const catOk = cat === 'all' || elCat === cat;
+          const qOk = !q || text.includes(q);
+          el.classList.toggle('hidden', !(catOk && qOk));
+        });
+      };
+      search?.addEventListener('input', apply);
+      $$('#toolsChipRow .hf-chip').forEach((chip) => {
+        chip.addEventListener('click', () => {
+          $$('#toolsChipRow .hf-chip').forEach((c) => c.classList.remove('active'));
+          chip.classList.add('active');
+          apply();
+        });
+      });
+    })();
+
 
     // Show / hide Request Body section based on HTTP method
     function updateBodyVisibility() {
@@ -1391,24 +1730,82 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       }
       const selected = new Set(state.selectedBatchIds || []);
       list.innerHTML = attacks.map(a => `
-        <label class="atk-picker-item${selected.has(a.id) ? ' selected' : ''}" data-id="${escapeHtml(a.id)}">
+        <div class="atk-picker-item${selected.has(a.id) ? ' selected' : ''}" data-id="${escapeHtml(a.id)}">
           <input type="checkbox" ${selected.has(a.id) ? 'checked' : ''} />
           <span class="atk-name" title="${escapeHtml(a.name)}">⚡ ${escapeHtml(a.name)}</span>
           <span class="atk-meta">${a.count} req</span>
-        </label>
+          <button type="button" class="atk-del" data-del="${escapeHtml(a.id)}" title="Delete attack">×</button>
+        </div>
       `).join('');
       list.querySelectorAll('.atk-picker-item').forEach(el => {
         const cb = el.querySelector('input');
         const sync = () => el.classList.toggle('selected', cb.checked);
         cb.addEventListener('change', sync);
         el.addEventListener('click', (e) => {
-          if (e.target === cb) return;
+          if (e.target.closest('input, button')) return;
           e.preventDefault();
           cb.checked = !cb.checked;
           sync();
         });
+        el.querySelector('.atk-del')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteAttackById(el.dataset.id);
+        });
       });
       ov.classList.add('open');
+    }
+
+    function deleteAttackById(batchId) {
+      if (!batchId) return;
+      const name = state.attackSources?.[batchId]?.name
+        || state.history.find(h => h.batchId === batchId)?.batchName
+        || batchId;
+      const count = state.history.filter(h => h.batchId === batchId).length;
+      if (!confirm(`Delete attack "${name}" and its ${count} request(s)?`)) return;
+      state.history = state.history.filter(h => h.batchId !== batchId);
+      if (state.attackSources) delete state.attackSources[batchId];
+      if (state.collapsedBatches) delete state.collapsedBatches[batchId];
+      state.selectedBatchIds = (state.selectedBatchIds || []).filter(id => id !== batchId);
+      if (state.activeHistoryId && !state.history.some(h => h.id === state.activeHistoryId)) {
+        state.activeHistoryId = null;
+      }
+      renderHistory();
+      renderHfChips();
+      // Refresh picker if still open
+      const ov = $('#atkPickerOverlay');
+      if (ov && ov.classList.contains('open')) {
+        const left = getKnownAttacks();
+        if (!left.length) closeAttackPicker();
+        else openAttackPicker();
+      }
+      showToast('Attack deleted', 'success');
+    }
+
+    function deleteSelectedAttacks() {
+      const list = $('#atkPickerList');
+      if (!list) return;
+      const ids = [...list.querySelectorAll('.atk-picker-item')].filter(el => el.querySelector('input')?.checked).map(el => el.dataset.id);
+      if (!ids.length) {
+        showToast('Select attacks to delete');
+        return;
+      }
+      const totalReq = state.history.filter(h => ids.includes(h.batchId)).length;
+      if (!confirm(`Delete ${ids.length} attack(s) and ${totalReq} request(s)?`)) return;
+      ids.forEach((batchId) => {
+        state.history = state.history.filter(h => h.batchId !== batchId);
+        if (state.attackSources) delete state.attackSources[batchId];
+        if (state.collapsedBatches) delete state.collapsedBatches[batchId];
+      });
+      state.selectedBatchIds = (state.selectedBatchIds || []).filter(id => !ids.includes(id));
+      if (state.activeHistoryId && !state.history.some(h => h.id === state.activeHistoryId)) {
+        state.activeHistoryId = null;
+      }
+      renderHistory();
+      renderHfChips();
+      const left = getKnownAttacks();
+      if (!left.length) closeAttackPicker();
+      else openAttackPicker();
+      showToast('Selected attacks deleted', 'success');
     }
 
     function closeAttackPicker() {
@@ -1446,6 +1843,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           cb.closest('.atk-picker-item')?.classList.remove('selected');
         });
       });
+      $('#atkPickerDeleteSelected')?.addEventListener('click', deleteSelectedAttacks);
     })();
 
     // ===== Advanced History Filter Engine =====
@@ -1498,6 +1896,27 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       catch { return null; }
     }
 
+    /**
+     * Pattern match with optional invert.
+     * Prefix "!" → NOT match (simple alternative to negative lookahead).
+     * Example: !admin  → text must NOT contain / match "admin"
+     * Full regex still works:  ^(?!.*admin).*$  is the pure-regex form of the same idea.
+     */
+    function matchPattern(text, pat) {
+      if (pat == null || pat === '') return true;
+      let p = String(pat);
+      let neg = false;
+      if (p.startsWith('!')) {
+        neg = true;
+        p = p.slice(1);
+      }
+      const re = safeRegex(p);
+      let hit;
+      if (re) hit = re.test(String(text ?? ''));
+      else hit = String(text ?? '').toLowerCase().includes(p.toLowerCase());
+      return neg ? !hit : hit;
+    }
+
     function matchNumeric(op, value, a, b) {
       if (!op) return true;
       const v = Number(value) || 0;
@@ -1545,31 +1964,15 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       if (!matchNumeric(rule.sizeOp, bodyLen, rule.sizeA, rule.sizeB)) return false;
       if (!matchNumeric(rule.rttOp, rtt, rule.rttA, rule.rttB)) return false;
 
-      if (rule.urlPat) {
-        const re = safeRegex(rule.urlPat);
-        if (re && !re.test(url)) return false;
-        if (!re && !url.toLowerCase().includes(String(rule.urlPat).toLowerCase())) return false;
-      }
-      if (rule.bodyPat) {
-        const re = safeRegex(rule.bodyPat);
-        if (re && !re.test(respBody)) return false;
-        if (!re && !respBody.toLowerCase().includes(String(rule.bodyPat).toLowerCase())) return false;
-      }
+      if (rule.urlPat && !matchPattern(url, rule.urlPat)) return false;
+      if (rule.bodyPat && !matchPattern(respBody, rule.bodyPat)) return false;
       if (rule.methods && rule.methods.length) {
         if (!rule.methods.includes(method)) return false;
       }
-      if (rule.reqPat) {
-        const re = safeRegex(rule.reqPat);
-        if (re && !re.test(reqBody)) return false;
-        if (!re && !String(reqBody).toLowerCase().includes(String(rule.reqPat).toLowerCase())) return false;
-      }
+      if (rule.reqPat && !matchPattern(reqBody, rule.reqPat)) return false;
       if (!matchNumeric(rule.reqLenOp, String(reqBody).length, rule.reqLenA, rule.reqLenB)) return false;
 
-      if (rule.notePat) {
-        const re = safeRegex(rule.notePat);
-        if (re && !re.test(note)) return false;
-        if (!re && !note.toLowerCase().includes(String(rule.notePat).toLowerCase())) return false;
-      }
+      if (rule.notePat && !matchPattern(note, rule.notePat)) return false;
       if (rule.hasNote === 'yes' && !note.trim()) return false;
       if (rule.hasNote === 'no' && note.trim()) return false;
 
@@ -2175,8 +2578,8 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
               <span title="${escapeHtml(exactTime)}">${relTime}</span>
             </span>
             <div class="history-actions">
-              <button class="hist-btn pin-btn ${item.pinned ? 'pinned' : ''}" data-id="${item.id}" title="${item.pinned ? 'Unpin' : 'Pin'}">
-                ${neonPin(!!item.pinned)}
+              <button class="hist-btn pin-btn ${item.pinned ? 'pinned' : ''}" data-id="${item.id}" title="${item.pinned ? 'Unstar' : 'Star'}">
+                ${item.pinned ? '★' : '☆'}
               </button>
               <button class="hist-btn del-btn" data-id="${item.id}" title="Delete">✕</button>
             </div>
@@ -2539,7 +2942,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           if ($('#atkThreads')) $('#atkThreads').value = src.atkConfig.threads;
           if ($('#atkDelay')) $('#atkDelay').value = src.atkConfig.delay;
           if ($('#atkTimeout')) $('#atkTimeout').value = src.atkConfig.timeout;
-          if ($('#atkStopOn')) $('#atkStopOn').value = src.atkConfig.stopOn;
+          // legacy stopOn ignored — advanced panel used instead
         }
         if (typeof updateBodyVisibility === 'function') updateBodyVisibility();
         if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
@@ -3240,7 +3643,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       if (cookieHeader) {
         cookieHeader.value = newVal;
       } else {
-        state.headers.push({ key: 'Cookie', value: newVal, persist: false });
+        state.headers.push({ key: 'Cookie', value: newVal });
       }
       if (typeof savePersistedHeaders === 'function') savePersistedHeaders();
       if (typeof renderHeaders === 'function') renderHeaders();
@@ -4188,18 +4591,22 @@ img, video, canvas { opacity: 0.9; }
       'adv-filter': '#advFilterPanel',
       'attack-dialog': '#attackNameDialog',
     };
-    const PINNABLE = new Set(['payload', 'history', 'cheatsheet', 'proxy']);
+    const PINNABLE = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools']);
     const PIN_BTN_SEL = {
       payload: '#payloadPinBtn',
       history: '#historyPinBtn',
       cheatsheet: '#cheatPinBtn',
       proxy: '#proxyPinBtn',
+      settings: '#settingsPinBtn',
+      tools: '#toolsPinBtn',
     };
     const PIN_DEFAULTS = {
       payload: { top: '80px', right: '24px', width: '420px', height: '420px' },
       history: { top: '72px', left: '16px', width: '360px', height: Math.min(window.innerHeight * 0.7, 620) + 'px' },
       cheatsheet: { top: '72px', left: '10%', width: '480px', height: Math.min(window.innerHeight * 0.75, 640) + 'px' },
       proxy: { top: '72px', left: '12%', width: '520px', height: Math.min(window.innerHeight * 0.75, 620) + 'px' },
+      settings: { top: '64px', left: Math.max(24, (window.innerWidth - 640) / 2) + 'px', width: Math.min(640, window.innerWidth * 0.92) + 'px', height: Math.min(window.innerHeight * 0.8, 700) + 'px' },
+      tools: { top: '64px', right: '16px', width: '360px', height: Math.min(window.innerHeight * 0.7, 560) + 'px' },
     };
     const vpanelBackdrop = $('#vpanelBackdrop');
     let activeVPanel = null;
@@ -4216,19 +4623,20 @@ img, video, canvas { opacity: 0.9; }
       return [...PINNABLE].some((n) => isPanelPinnedOpen(n));
     }
 
-    /** Raise a pinned panel above others and mark nav active */
-    function focusPinnedPanel(name) {
+    /** Raise any open panel above others (Windows-style window focus) */
+    function focusPanel(name) {
       const panel = $(VPANEL_MAP[name]);
-      if (!panel) return;
+      if (!panel || !panel.classList.contains('open')) return;
       panelZCounter += 1;
       panel.style.zIndex = String(panelZCounter);
-      $$('.vpanel.pinned').forEach((el) => el.classList.remove('panel-front'));
-      if (panel.classList.contains('pinned')) panel.classList.add('panel-front');
+      $$('.vpanel').forEach((el) => el.classList.remove('panel-front'));
+      panel.classList.add('panel-front');
       activeVPanel = name;
       $$('.nav-tool').forEach((b) => b.classList.remove('active'));
       const navBtn = document.querySelector(`.nav-tool[data-panel="${name}"]`);
       if (navBtn) navBtn.classList.add('active');
     }
+    function focusPinnedPanel(name) { focusPanel(name); }
 
     function unpinPanel(name) {
       const el = $(VPANEL_MAP[name]);
@@ -4253,27 +4661,42 @@ img, video, canvas { opacity: 0.9; }
       const panel = $(sel);
       if (!panel) return;
 
+      // Pin = never auto-close. Work panels can stay under modals (settings opens on top of payload).
+      const MODALS = new Set(['settings', 'adv-filter', 'attack-dialog']);
+      const WORK = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'tools']);
+
       Object.keys(VPANEL_MAP).forEach((k) => {
         if (k === name) return;
         const el = $(VPANEL_MAP[k]);
-        if (!el) return;
-        if (PINNABLE.has(k) && el.classList.contains('pinned') && el.classList.contains('open')) return;
+        if (!el || !el.classList.contains('open')) return;
+        // Pinned panels never auto-close
+        if (el.classList.contains('pinned')) return;
+        // Opening a modal: keep work panels underneath
+        if (MODALS.has(name) && WORK.has(k)) return;
         el.classList.remove('open');
       });
       $$('.nav-tool').forEach((b) => b.classList.remove('active'));
 
       panel.classList.add('open');
       activeVPanel = name;
+      // Raise z-index so the opened panel is on top of any stack underneath
+      panelZCounter += 1;
+      panel.style.zIndex = String(panelZCounter);
+
       const navBtn = document.querySelector(`.nav-tool[data-panel="${name}"]`);
       if (navBtn) navBtn.classList.add('active');
 
-      if (panel.classList.contains('pinned')) {
-        focusPinnedPanel(name);
-      }
+      // Always raise opened panel to front
+      focusPanel(name);
 
       if (vpanelBackdrop) {
         if (PINNABLE.has(name) && panel.classList.contains('pinned')) {
-          vpanelBackdrop.classList.remove('open');
+          // only pinned work panel: no backdrop if nothing else needs it
+          const needBd = Object.keys(VPANEL_MAP).some((k) => {
+            const el = $(VPANEL_MAP[k]);
+            return el && el.classList.contains('open') && !el.classList.contains('pinned');
+          });
+          vpanelBackdrop.classList.toggle('open', needBd);
         } else {
           vpanelBackdrop.classList.add('open');
         }
@@ -4288,12 +4711,16 @@ img, video, canvas { opacity: 0.9; }
       if (!name || name === 'adv-filter') {
         if (typeof closeAdvMatchesOverlay === 'function') closeAdvMatchesOverlay();
       }
+      if (!name || name === 'settings') {
+        if (typeof closeCookieManager === 'function') closeCookieManager();
+      }
       const targets = name ? [name] : Object.keys(VPANEL_MAP);
       targets.forEach((k) => {
         const el = $(VPANEL_MAP[k]);
         if (!el) return;
         el.classList.remove('open');
-        if (PINNABLE.has(k)) unpinPanel(k);
+        // Only unpin when that panel itself is being closed — pin means "don't auto-close"
+        if (PINNABLE.has(k) && (!name || name === k)) unpinPanel(k);
       });
 
       if (vpanelBackdrop) {
@@ -4490,7 +4917,7 @@ img, video, canvas { opacity: 0.9; }
       });
     }
 
-    ['payload', 'history', 'cheatsheet', 'proxy'].forEach((name) => {
+    ['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools'].forEach((name) => {
       const sel = PIN_BTN_SEL[name];
       const btn = sel ? $(sel) : null;
       if (!btn) return;
@@ -4505,10 +4932,26 @@ img, video, canvas { opacity: 0.9; }
     setupPinnedDrag('#historyPanel', '#historyDragHandle');
     setupPinnedDrag('#cheatSheetPanel', '#cheatDragHandle');
     setupPinnedDrag('#proxyPanel', '#proxyDragHandle');
+    setupPinnedDrag('#settingsPanel', '#settingsDragHandle');
+    setupPinnedDrag('#toolsPanel', '#toolsDragHandle');
     setupPinnedResize('#payloadWorkbench');
     setupPinnedResize('#historyPanel');
     setupPinnedResize('#cheatSheetPanel');
     setupPinnedResize('#proxyPanel');
+    setupPinnedResize('#settingsPanel');
+    setupPinnedResize('#toolsPanel');
+
+    // Click any open panel → bring to front (Windows-style)
+    Object.keys(VPANEL_MAP).forEach((name) => {
+      const el = $(VPANEL_MAP[name]);
+      if (!el) return;
+      el.addEventListener('mousedown', (e) => {
+        if (!el.classList.contains('open')) return;
+        // Don't steal focus from nested interactive when closing
+        if (e.target.closest('[data-close-panel]')) return;
+        focusPanel(name);
+      }, true);
+    });
 
     // Keep legacy names used elsewhere
     function setPayloadPinned(on) {
@@ -4808,18 +5251,26 @@ img, video, canvas { opacity: 0.9; }
           if (btnX) btnX.removeEventListener('click', onCancel);
           nameInput.removeEventListener('keydown', onKey);
         };
+        const restoreBackdropAfterDialog = () => {
+          if (!vpanelBackdrop) return;
+          // Backdrop only if a non-pinned panel is still open
+          const needBd = Object.keys(VPANEL_MAP || {}).some((k) => {
+            const el = $(VPANEL_MAP[k]);
+            return el && el.classList.contains('open') && !el.classList.contains('pinned')
+              && k !== 'attack-dialog';
+          });
+          vpanelBackdrop.classList.toggle('open', needBd);
+        };
         const onOk = () => {
           const name = (nameInput.value || '').trim() || defaultName;
           const note = (noteInput && noteInput.value || '').trim();
           cleanup();
-          // restore backdrop state for pinned payload
-          if (vpanelBackdrop && isPayloadPinnedOpen()) vpanelBackdrop.classList.remove('open');
+          restoreBackdropAfterDialog();
           resolve({ name, note, cancelled: false });
         };
         const onCancel = () => {
           cleanup();
-          if (vpanelBackdrop && isPayloadPinnedOpen()) vpanelBackdrop.classList.remove('open');
-          else if (vpanelBackdrop) vpanelBackdrop.classList.remove('open');
+          restoreBackdropAfterDialog();
           resolve({ name: '', note: '', cancelled: true });
         };
         const onKey = (e) => {
@@ -5192,6 +5643,7 @@ img, video, canvas { opacity: 0.9; }
     function setAttackControls(running) {
       pauseBtn.classList.toggle('hidden', !running);
       stopBtn.classList.toggle('hidden', !running);
+      document.body.classList.toggle('attack-running', !!running);
       if (!running) {
         urlProgressBar.style.width = '0%';
         urlProgressBar.classList.remove('active');
@@ -5200,6 +5652,9 @@ img, video, canvas { opacity: 0.9; }
         state.attack.paused = false;
         state.attack.stop = false;
         state.attack.active = false;
+        sendBtn.classList.remove('loading');
+        sendBtn.disabled = false;
+        state.isSending = false;
       } else {
         urlProgressBar.classList.add('active');
       }
@@ -5209,6 +5664,7 @@ img, video, canvas { opacity: 0.9; }
       if (!state.attack.active) return;
       state.attack.paused = !state.attack.paused;
       pauseBtn.textContent = state.attack.paused ? 'Resume' : 'Pause';
+      urlProgressBar?.classList.toggle('active', !state.attack.paused && !state.attack.stop);
       showToast(state.attack.paused ? 'Attack paused' : 'Attack resumed');
     });
     stopBtn.addEventListener('click', () => {
@@ -5322,19 +5778,109 @@ img, video, canvas { opacity: 0.9; }
       return entry;
     }
 
-    function shouldStopAttack(entry, stopOn, baselineSize) {
-      if (stopOn === 'none') return false;
-      if (stopOn === '2xx' && entry.response.status >= 200 && entry.response.status < 300) return true;
-      if (stopOn === 'diff' && baselineSize != null) {
-        const sz = (entry.response.body || '').length;
-        if (Math.abs(sz - baselineSize) > 50) return true;
+    function readAttackStopConfig() {
+      const parseStatusList = (str) => {
+        const out = [];
+        String(str || '').split(/[,\s]+/).filter(Boolean).forEach((part) => {
+          const m = part.match(/^(\d{1,3})-(\d{1,3})$/);
+          if (m) out.push([+m[1], +m[2]]);
+          else if (/^\d+$/.test(part)) { const n = +part; out.push([n, n]); }
+        });
+        return out;
+      };
+      return {
+        action: ($('#atkMatchAction')?.value === 'stop') ? 'stop' : 'pause',
+        matchTimes: Math.max(1, Math.min(100, +($('#atkMatchTimes')?.value || 1))),
+        cond2xx: !!$('#atkCond2xx')?.checked,
+        cond3xx: !!$('#atkCond3xx')?.checked,
+        cond4xx: !!$('#atkCond4xx')?.checked,
+        cond5xx: !!$('#atkCond5xx')?.checked,
+        cond0: !!$('#atkCond0')?.checked,
+        condSql: !!$('#atkCondSql')?.checked,
+        condStatus: !!$('#atkCondStatus')?.checked,
+        statusRanges: parseStatusList($('#atkCondStatusVal')?.value),
+        condBody: !!$('#atkCondBody')?.checked,
+        bodyRe: ($('#atkCondBodyVal')?.value || '').trim(),
+        condUrl: !!$('#atkCondUrl')?.checked,
+        urlRe: ($('#atkCondUrlVal')?.value || '').trim(),
+        condTime: !!$('#atkCondTime')?.checked,
+        timeMs: +($('#atkCondTimeVal')?.value || 0),
+        condSize: !!$('#atkCondSize')?.checked,
+        sizeOp: ($('#atkCondSizeOp')?.value || 'gt'),
+        sizeVal: +($('#atkCondSizeVal')?.value || 0),
+        condSizeDiff: !!$('#atkCondSizeDiff')?.checked,
+        sizeDiff: +($('#atkCondSizeDiffVal')?.value || 50),
+      };
+    }
+
+    function attackConditionActive(cfg) {
+      return !!(cfg.cond2xx || cfg.cond3xx || cfg.cond4xx || cfg.cond5xx || cfg.cond0 ||
+        cfg.condSql || cfg.condStatus || cfg.condBody || cfg.condUrl ||
+        cfg.condTime || cfg.condSize || cfg.condSizeDiff);
+    }
+
+    function updateAtkStopSummary() {
+      const el = $('#atkStopSummary');
+      if (!el) return;
+      const cfg = readAttackStopConfig();
+      if (!attackConditionActive(cfg)) {
+        el.textContent = 'No conditions · never auto-pause';
+        return;
       }
-      if (stopOn === 'error') {
-        const body = (entry.response.body || '').toLowerCase();
-        if (/sql syntax|mysql|odbc|ora-\d|postgresql|sqlite|unclosed quotation|sqlstate/i.test(body)) return true;
-        if (entry.response.status >= 500) return true;
+      const parts = [];
+      if (cfg.cond2xx) parts.push('2xx');
+      if (cfg.cond3xx) parts.push('3xx');
+      if (cfg.cond4xx) parts.push('4xx');
+      if (cfg.cond5xx) parts.push('5xx');
+      if (cfg.cond0) parts.push('ERR');
+      if (cfg.condSql) parts.push('SQLi-err');
+      if (cfg.condStatus) parts.push('status');
+      if (cfg.condBody) parts.push('body');
+      if (cfg.condUrl) parts.push('url');
+      if (cfg.condTime) parts.push('time');
+      if (cfg.condSize) parts.push('size');
+      if (cfg.condSizeDiff) parts.push('Δsize');
+      el.textContent = `${cfg.action} after ${cfg.matchTimes}× · ${parts.join('+')}`;
+    }
+
+    function shouldStopAttack(entry, cfg, baselineSize) {
+      if (!cfg || !attackConditionActive(cfg)) return false;
+      const st = entry.response.status || 0;
+      const body = entry.response.body || '';
+      const timeMs = entry.response.timeMs || 0;
+      const checks = [];
+      if (cfg.cond2xx) checks.push(st >= 200 && st < 300);
+      if (cfg.cond3xx) checks.push(st >= 300 && st < 400);
+      if (cfg.cond4xx) checks.push(st >= 400 && st < 500);
+      if (cfg.cond5xx) checks.push(st >= 500 && st < 600);
+      if (cfg.cond0) checks.push(st === 0);
+      if (cfg.condSql) {
+        checks.push(/sql syntax|mysql|odbc|ora-\d|postgresql|sqlite|unclosed quotation|sqlstate|you have an error in your sql/i.test(body));
       }
-      return false;
+      if (cfg.condStatus) {
+        const ranges = cfg.statusRanges || [];
+        checks.push(ranges.some(([a, b]) => st >= a && st <= b));
+      }
+      if (cfg.condBody && cfg.bodyRe) {
+        checks.push(matchPattern(body, cfg.bodyRe));
+      }
+      if (cfg.condUrl && cfg.urlRe) {
+        checks.push(matchPattern(entry.url || '', cfg.urlRe));
+      }
+      if (cfg.condTime) checks.push(timeMs >= (cfg.timeMs || 0));
+      if (cfg.condSize) {
+        const sz = body.length;
+        const n = cfg.sizeVal || 0;
+        if (cfg.sizeOp === 'lt') checks.push(sz <= n);
+        else if (cfg.sizeOp === 'eq') checks.push(sz === n);
+        else checks.push(sz >= n);
+      }
+      if (cfg.condSizeDiff && baselineSize != null) {
+        const sz = body.length;
+        checks.push(Math.abs(sz - baselineSize) >= (cfg.sizeDiff || 0));
+      }
+      // AND across enabled conditions
+      return checks.length > 0 && checks.every(Boolean);
     }
 
     async function runAttack(payloads) {
@@ -5354,17 +5900,27 @@ img, video, canvas { opacity: 0.9; }
       const customHeaders = buildRequestHeaders(postBodyTemplate);
       const threads = Math.max(1, Math.min(50, +($('#atkThreads')?.value || 3)));
       const delay = Math.max(0, +($('#atkDelay')?.value || 200));
-      const stopOn = $('#atkStopOn')?.value || 'none';
+      const stopCfg = readAttackStopConfig();
       const batchId = 'atk-' + Date.now();
 
       state.attack = {
         active: true, paused: false, stop: false,
         total: payloads.length, done: 0, batchId, payloads, name: attackName, note: attackNote,
+        matchHits: 0,
+        stopCfg,
       };
+      // Keep UI interactive — only guard against double-start
       state.isSending = true;
       sendBtn.classList.add('loading');
-      sendBtn.disabled = true;
+      // Do NOT disable entire chrome; pause/stop must stay clickable
       setAttackControls(true);
+      document.body.classList.add('attack-running');
+      // Free the UI: close non-pinned payload (backdrop was locking the page)
+      const pw = $('#payloadWorkbench');
+      if (pw && pw.classList.contains('open') && !pw.classList.contains('pinned')) {
+        pw.classList.remove('open');
+      }
+      if (vpanelBackdrop) vpanelBackdrop.classList.remove('open');
       setProgress(0, payloads.length);
 
       // Save full attack source so it can be restored later
@@ -5380,7 +5936,7 @@ img, video, canvas { opacity: 0.9; }
           threads,
           delay,
           timeout: +($('#atkTimeout')?.value || 15),
-          stopOn,
+          stopCfg,
         },
       };
 
@@ -5414,21 +5970,37 @@ img, video, canvas { opacity: 0.9; }
               state.attack.done++;
               setProgress(state.attack.done, state.attack.total);
 
-              // Always update the latest into view (user can click older ones anytime)
               state.activeHistoryId = entry.id;
-              displayResponse(entry.response, entry.url);
-              renderHistory();
+              // Throttle heavy UI so pause/stop stay responsive
+              const now = Date.now();
+              if (!state.attack._lastUi || now - state.attack._lastUi > 350 || state.attack.paused || state.attack.stop) {
+                state.attack._lastUi = now;
+                displayResponse(entry.response, entry.url);
+                renderHistory();
+              }
 
               if (baselineSize == null && entry.response.status > 0) {
                 baselineSize = (entry.response.body || '').length;
               }
-              if (shouldStopAttack(entry, stopOn, baselineSize)) {
-                state.attack.stop = true;
-                stoppedEarly = true;
-                showToast(`Stop condition met on payload: ${p.text.slice(0, 40)}`);
+              if (!state.attack.stop && shouldStopAttack(entry, stopCfg, baselineSize)) {
+                state.attack.matchHits = (state.attack.matchHits || 0) + 1;
+                if (state.attack.matchHits >= (stopCfg.matchTimes || 1)) {
+                  queue.length = 0; // no new workers
+                  if (stopCfg.action === 'stop') {
+                    state.attack.stop = true;
+                    stoppedEarly = true;
+                    urlProgressBar?.classList.remove('active');
+                    showToast(`Stop condition met (${state.attack.matchHits}×): ${p.text.slice(0, 40)}`);
+                  } else {
+                    state.attack.paused = true;
+                    if (pauseBtn) pauseBtn.textContent = 'Resume';
+                    urlProgressBar?.classList.remove('active');
+                    showToast(`Pause condition met (${state.attack.matchHits}×): ${p.text.slice(0, 40)}`);
+                  }
+                }
               }
 
-              if (delay > 0) await new Promise(r => setTimeout(r, delay));
+              if (delay > 0 && !state.attack.stop) await new Promise(r => setTimeout(r, delay));
               running--;
               pump();
             })();
@@ -5600,7 +6172,7 @@ img, video, canvas { opacity: 0.9; }
           cheatNav._ready = true;
         }
         // Neon icons on static Pin buttons
-      ['payloadPinBtn','historyPinBtn','cheatPinBtn','proxyPinBtn'].forEach((id) => {
+      ['payloadPinBtn','historyPinBtn','cheatPinBtn','proxyPinBtn','settingsPinBtn','toolsPinBtn'].forEach((id) => {
         const b = document.getElementById(id);
         if (b && typeof neonPin === 'function') b.innerHTML = neonPin(b.classList.contains('active'), { label: 'Pin' });
       });
@@ -5663,7 +6235,7 @@ img, video, canvas { opacity: 0.9; }
                 <button type="button" class="del-btn" data-act="del" title="Remove">×</button>
               </div>
             </div>
-            ${p.note ? `<div class="proxy-item-note">${escapeHtml(p.note)}</div>` : ''}
+            
             <div class="proxy-item-meta">
               <span>↑ ${formatBytes(p.bytesOut || 0)}</span>
               <span>↓ ${formatBytes(p.bytesIn || 0)}</span>
@@ -5744,9 +6316,12 @@ img, video, canvas { opacity: 0.9; }
     function startProxyPingLoop() {
       if (proxyPingTimer) clearInterval(proxyPingTimer);
       proxyPingTimer = setInterval(() => {
+        // Only ping while Proxy tool panel is open
+        const panel = $('#proxyPanel');
+        if (!panel || !panel.classList.contains('open')) return;
         const active = getActiveProxy();
         if (active) pingProxy(active, false);
-      }, 15000);
+      }, 10000);
     }
 
     function bindToolsAndProxyUI() {
@@ -5757,7 +6332,6 @@ img, video, canvas { opacity: 0.9; }
       if (addBtn) {
         addBtn.addEventListener('click', () => {
           let url = ($('#proxyUrlInput')?.value || '').trim();
-          const note = ($('#proxyNoteInput')?.value || '').trim();
           if (!url) {
             showToast('Enter proxy URL');
             return;
@@ -5770,7 +6344,6 @@ img, video, canvas { opacity: 0.9; }
           const item = {
             id: 'px-' + Date.now().toString(36),
             url,
-            note,
             pinned: false,
             bytesIn: 0,
             bytesOut: 0,
@@ -5781,7 +6354,6 @@ img, video, canvas { opacity: 0.9; }
           proxyState.items.push(item);
           saveProxyState();
           if ($('#proxyUrlInput')) $('#proxyUrlInput').value = '';
-          if ($('#proxyNoteInput')) $('#proxyNoteInput').value = '';
           renderProxyList();
           showToast('Proxy added', 'success');
           pingProxy(item, false);
@@ -5799,6 +6371,111 @@ img, video, canvas { opacity: 0.9; }
         });
       }
     }
+
+
+    // Welcome redesign — spotlight + aurora + card glow
+    (function bindWelcome() {
+      const root = $('#renderedPlaceholder');
+      if (!root) return;
+      const spot = root.querySelector('#wMinSpot');
+      const auroras = [...root.querySelectorAll('.w-aurora')];
+
+      const setLocalXY = (el, e) => {
+        const r = el.getBoundingClientRect();
+        const x = ((e.clientX - r.left) / Math.max(1, r.width)) * 100;
+        const y = ((e.clientY - r.top) / Math.max(1, r.height)) * 100;
+        el.style.setProperty('--mx', x.toFixed(2) + '%');
+        el.style.setProperty('--my', y.toFixed(2) + '%');
+      };
+
+      root.addEventListener('mousemove', (e) => {
+        const r = root.getBoundingClientRect();
+        const nx = (e.clientX - r.left) / Math.max(1, r.width);
+        const ny = (e.clientY - r.top) / Math.max(1, r.height);
+        root.classList.add('is-hot');
+        if (spot) {
+          spot.style.left = (nx * 100).toFixed(2) + '%';
+          spot.style.top = (ny * 100).toFixed(2) + '%';
+        }
+        auroras.forEach((a, i) => {
+          const strength = 16 + i * 12;
+          a.style.transform = `translate(${((nx - 0.5) * strength).toFixed(1)}px, ${((ny - 0.5) * strength).toFixed(1)}px)`;
+        });
+      });
+      root.addEventListener('mouseleave', () => {
+        root.classList.remove('is-hot');
+        auroras.forEach((a) => { a.style.transform = ''; });
+      });
+
+      root.querySelectorAll('.w-btn-primary, .w-btn-secondary, .w-card').forEach((el) => {
+        el.addEventListener('mousemove', (e) => setLocalXY(el, e));
+      });
+
+      // Colored sparks from cursor, then orbiting border takes over
+      root.querySelectorAll('.w-card').forEach((card) => {
+        card.addEventListener('mouseenter', (e) => {
+          // clear old sparks
+          card.querySelectorAll('.w-spark').forEach((s) => s.remove());
+          const r = card.getBoundingClientRect();
+          const x = e.clientX - r.left;
+          const y = e.clientY - r.top;
+          const colors = ['#ff4d9a', '#c084ff', '#ff7ac8', '#a78bfa'];
+          for (let i = 0; i < 4; i++) {
+            const sp = document.createElement('span');
+            sp.className = 'w-spark';
+            const ang = (-40 + i * 35) * Math.PI / 180;
+            const dist = 18 + i * 8;
+            sp.style.left = x + 'px';
+            sp.style.top = y + 'px';
+            sp.style.setProperty('--sx', (Math.cos(ang) * dist).toFixed(1) + 'px');
+            sp.style.setProperty('--sy', (Math.sin(ang) * dist).toFixed(1) + 'px');
+            sp.style.color = colors[i];
+            sp.style.background = colors[i];
+            sp.style.animationDelay = (i * 0.07) + 's';
+            card.appendChild(sp);
+          }
+          card.classList.add('is-orbiting');
+        });
+        card.addEventListener('mouseleave', () => {
+          card.classList.remove('is-orbiting');
+          card.querySelectorAll('.w-spark').forEach((s) => s.remove());
+        });
+      });
+
+      root.querySelectorAll('[data-open]').forEach((el) => {
+        el.addEventListener('click', () => {
+          const name = el.dataset.open;
+          if (name && typeof openVPanel === 'function') openVPanel(name);
+        });
+      });
+    })();
+
+    // Attack stop conditions overlay
+    (function bindAtkStopOverlay() {
+      const openBtn = $('#atkStopOpenBtn');
+      const ov = $('#atkStopOverlay');
+      if (!openBtn || !ov) return;
+      const open = () => { ov.classList.add('open'); updateAtkStopSummary(); };
+      const close = () => { ov.classList.remove('open'); updateAtkStopSummary(); };
+      openBtn.addEventListener('click', (e) => { e.stopPropagation(); open(); });
+      $('#atkStopClose')?.addEventListener('click', close);
+      $('#atkStopDone')?.addEventListener('click', close);
+      $('#atkStopClear')?.addEventListener('click', () => {
+        ov.querySelectorAll('input[type=checkbox]').forEach((c) => { c.checked = false; });
+        ov.querySelectorAll('input[type=text], input[type=number]').forEach((i) => {
+          if (i.id === 'atkCondSizeDiffVal') i.value = '50';
+          else i.value = '';
+        });
+        updateAtkStopSummary();
+      });
+      ov.querySelectorAll('input, select').forEach((el) => {
+        el.addEventListener('change', updateAtkStopSummary);
+        el.addEventListener('input', updateAtkStopSummary);
+      });
+      $('#atkMatchAction')?.addEventListener('change', updateAtkStopSummary);
+      $('#atkMatchTimes')?.addEventListener('input', updateAtkStopSummary);
+      updateAtkStopSummary();
+    })();
 
     // ===== Init =====
     function init() {
@@ -5821,7 +6498,7 @@ img, video, canvas { opacity: 0.9; }
       renderCheatSheet();
       renderHfChips();
       renderHistory();
-      urlInput.value = 'https://vulnerable.example.com/page.php?id=$1';
+      urlInput.value = '';
       payloadInput.value = '';
       refreshAttackPanel();
       // Show shortcut hints on nav buttons

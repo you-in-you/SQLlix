@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>SQLi Workbench — Manual Injection Testing Tool</title>
+  <title>SQLlix — Manual SQL Injection Lab</title>
   <link rel="stylesheet" href="css/styles.css" />
 
 </head>
@@ -96,12 +96,97 @@
             </div>
           </div>
           <div id="tab-rendered" class="tab-content active">
-            <div class="rendered-placeholder" id="renderedPlaceholder">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4">
-                <rect x="3" y="3" width="18" height="18" rx="2"/>
-                <path d="M3 9h18M9 21V9"/>
-              </svg>
-              <span>Response will appear here after sending a request</span>
+            <div class="rendered-placeholder welcome-neon" id="renderedPlaceholder">
+              <div class="w-bg" aria-hidden="true">
+                <span class="w-aurora a1"></span>
+                <span class="w-aurora a2"></span>
+                <span class="w-aurora a3"></span>
+                <span class="w-grid"></span>
+                <span class="w-spot" id="wMinSpot"></span>
+                <span class="w-vignette"></span>
+              </div>
+
+              <div class="w-stage" id="welcomeMin">
+                <header class="w-top">
+                  <div class="w-brand">
+                    <button type="button" class="w-logo" id="wLogo" aria-label="SQLlix">
+                      <span class="w-logo-a">SQLlix</span>
+                      <span class="w-logo-b">powered by <em>Edis</em></span>
+                    </button>
+                  </div>
+                </header>
+
+                <div class="w-hero">
+                  <div class="w-hero-copy">
+                    <p class="w-eyebrow">Manual SQL injection lab</p>
+                    <h2 class="w-title">
+                      Build the payload.<br>
+                      <span>Read the silence.</span>
+                    </h2>
+                    <p class="w-desc">
+                      Repeater-grade control for SQLi — batch attacks, proxy, cookie vault,
+                      and a response inspector that keeps relative assets alive.
+                    </p>
+                    <div class="w-cta-row">
+                      <button type="button" class="w-btn-primary" data-open="payload">
+                        <span class="w-btn-shine"></span>
+                        Start in Payload
+                        <kbd>Ctrl+Alt+P</kbd>
+                      </button>
+                      <button type="button" class="w-btn-secondary" data-open="history">History</button>
+                      <button type="button" class="w-btn-secondary" data-open="tools">Tools</button>
+                    </div>
+                  </div>
+
+                  <div class="w-bento">
+                    <button type="button" class="w-card w-card-lg" data-open="payload">
+                      <span class="w-card-ico">⚡</span>
+                      <span class="w-card-label">Attack mode</span>
+                      <strong>Batch &amp; stop rules</strong>
+                      <p>Brace expand, threads, pause when the body talks back.</p>
+                    </button>
+                    <button type="button" class="w-card" data-open="history">
+                      <span class="w-card-ico">◈</span>
+                      <span class="w-card-label">History</span>
+                      <strong>Filter engine</strong>
+                      <p>Regex, stars, attack groups.</p>
+                    </button>
+                    <button type="button" class="w-card" data-open="tools">
+                      <span class="w-card-ico">⇄</span>
+                      <span class="w-card-label">Network</span>
+                      <strong>Live proxy</strong>
+                      <p>Ping, traffic, upstream.</p>
+                    </button>
+                    <button type="button" class="w-card" data-open="settings">
+                      <span class="w-card-ico">☰</span>
+                      <span class="w-card-label">Session</span>
+                      <strong>Cookie vault</strong>
+                      <p>Import Set-Cookie, pin, notes.</p>
+                    </button>
+                    <button type="button" class="w-card" data-open="tools">
+                      <span class="w-card-ico">⌘</span>
+                      <span class="w-card-label">Knowledge</span>
+                      <strong>Cheat sheet</strong>
+                      <p>Multi-DB payloads &amp; pins.</p>
+                    </button>
+                    <button type="button" class="w-card" data-open="payload">
+                      <span class="w-card-ico">↻</span>
+                      <span class="w-card-label">Transform</span>
+                      <strong>Converter</strong>
+                      <p>URL · Base64 · Hex per line.</p>
+                    </button>
+                  </div>
+                </div>
+
+                <footer class="w-bottom">
+                  <span class="w-pulse"></span>
+                  <span>Ready</span>
+                  <span class="w-sep">/</span>
+                  <span>No target loaded</span>
+                  <span class="w-sep">/</span>
+                  <span>Rendered view waits for your first request</span>
+                </footer>
+              </div>
             </div>
             <iframe id="rendered-frame" class="hidden" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-pointer-lock allow-downloads"></iframe>
           </div>
@@ -172,24 +257,146 @@
             <input type="number" id="atkTimeout" min="1" max="120" value="15" />
           </label>
           <label class="attack-field">
-            <span>Stop on</span>
-            <select id="atkStopOn">
-              <option value="none">Never</option>
-              <option value="2xx">First 2xx</option>
-              <option value="diff">Diff body size</option>
-              <option value="error">SQL error</option>
+            <span>On match</span>
+            <select id="atkMatchAction">
+              <option value="pause" selected>Pause</option>
+              <option value="stop">Stop</option>
             </select>
           </label>
+          <label class="attack-field">
+            <span>Match ×</span>
+            <input type="number" id="atkMatchTimes" min="1" max="100" value="1" title="How many times condition must match" />
+          </label>
+        </div>
+        <div class="atk-stop-bar">
+          <button type="button" class="btn btn-sm" id="atkStopOpenBtn" style="border-color:rgba(255,217,61,0.45);color:#ffd93d;">⚙ Stop conditions</button>
+          <span class="atk-stop-summary" id="atkStopSummary">No conditions · never auto-pause</span>
+        </div>
+        <!-- Stop conditions overlay (history-filter style) -->
+        <div class="atk-stop-overlay" id="atkStopOverlay">
+          <div class="atk-stop-overlay-head">
+            <strong>Stop / Pause conditions</strong>
+            <button type="button" class="btn btn-sm btn-ghost" id="atkStopClose">✕</button>
+          </div>
+          <div class="atk-stop-overlay-body">
+            <p class="atk-stop-hint">All enabled checks are <b>AND</b>. Regex fields support <code>!pattern</code> to invert (must NOT match). Pure regex alternative: <code>^(?!.*word).*$</code></p>
+            <div class="atk-stop-grid">
+              <label class="atk-stop-row"><input type="checkbox" id="atkCond2xx" /> Status 2xx</label>
+              <label class="atk-stop-row"><input type="checkbox" id="atkCond3xx" /> Status 3xx</label>
+              <label class="atk-stop-row"><input type="checkbox" id="atkCond4xx" /> Status 4xx</label>
+              <label class="atk-stop-row"><input type="checkbox" id="atkCond5xx" /> Status 5xx</label>
+              <label class="atk-stop-row"><input type="checkbox" id="atkCond0" /> Network error (0)</label>
+              <label class="atk-stop-row"><input type="checkbox" id="atkCondSql" /> SQL error signatures</label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondStatus" /> Status codes
+                <input type="text" id="atkCondStatusVal" class="atk-stop-input" placeholder="200,500 or 200-299" />
+              </label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondBody" /> Body regex
+                <input type="text" id="atkCondBodyVal" class="atk-stop-input" placeholder="mysql|syntax  or  !welcome" title="Prefix ! to invert" />
+              </label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondUrl" /> URL regex
+                <input type="text" id="atkCondUrlVal" class="atk-stop-input" placeholder="id=  or  !logout" title="Prefix ! to invert" />
+              </label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondTime" /> Time ≥ ms
+                <input type="number" id="atkCondTimeVal" class="atk-stop-input" min="0" placeholder="5000" />
+              </label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondSize" /> Body size
+                <select id="atkCondSizeOp" class="atk-stop-input" style="flex:0;min-width:70px;">
+                  <option value="gt">≥</option>
+                  <option value="lt">≤</option>
+                  <option value="eq">=</option>
+                </select>
+                <input type="number" id="atkCondSizeVal" class="atk-stop-input" min="0" placeholder="bytes" />
+              </label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondSizeDiff" /> Body size Δ vs first ≥
+                <input type="number" id="atkCondSizeDiffVal" class="atk-stop-input" min="0" placeholder="50" value="50" />
+              </label>
+            </div>
+          </div>
+          <div class="atk-stop-overlay-foot">
+            <button type="button" class="btn btn-sm btn-ghost" id="atkStopClear">Clear all</button>
+            <button type="button" class="btn btn-sm btn-primary" id="atkStopDone">Done</button>
+          </div>
         </div>
         <div id="attackPreview" class="attack-preview"></div>
       </div>
+      <div class="payload-label-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 6px;">
+        <span class="payload-label" style="margin:0;">Payload lines</span>
+        <div class="char-table-wrap" id="charTableWrap">
+          <button type="button" class="body-ct-badge" id="charTableBadge" title="Character table">Tables</button>
+        </div>
+      </div>
+      <div class="char-table-panel hidden" id="charTablePanel">
+        <div class="char-table-head">
+          <strong>Char table</strong>
+          <input type="search" id="charTableSearch" class="char-table-search" placeholder="Search char / code…" spellcheck="false" />
+          <button type="button" class="btn btn-sm btn-ghost" id="charTableClose">✕</button>
+        </div>
+        <div class="char-table-grid" id="charTableGrid"></div>
+        <div class="char-copy-pop hidden" id="charCopyPop">
+          <div class="char-copy-pop-head">
+            <span id="charCopyPopTitle">Copy</span>
+            <button type="button" class="btn btn-sm btn-ghost" id="charCopyPopClose">✕</button>
+          </div>
+          <div class="char-copy-pop-actions" id="charCopyPopActions"></div>
+        </div>
+      </div>
       <div class="payload-actions">
-        <button id="urlEncodeBtn" class="btn btn-sm" title="URL Encode">URL Encode</button>
-        <button id="urlDecodeBtn" class="btn btn-sm" title="URL Decode">URL Decode</button>
+        <button id="urlEncodeBtn" class="btn btn-sm" title="URL Encode (selection or each line)">URL Encode</button>
+        <button id="urlDecodeBtn" class="btn btn-sm" title="URL Decode (selection or each line)">URL Decode</button>
+        <button id="converterBtn" class="btn btn-sm" title="Open converter" style="border-color:var(--accent-cyan);color:var(--accent-cyan);">Converter</button>
         <button id="clearPayloadBtn" class="btn btn-sm btn-ghost">Clear</button>
         <button id="injectBtn" class="btn btn-sm" style="margin-left:auto; border-color:var(--accent); color:var(--accent);">
           Inject into Target
         </button>
+      </div>
+      <!-- Converter overlay (on top of Payload) -->
+      <div class="converter-overlay" id="converterOverlay">
+        <div class="converter-header">
+          <strong>Converter</strong>
+          <span class="converter-hint">Select text in Input → only that part converts · each line separate</span>
+          <button type="button" class="btn btn-sm" id="converterClose" style="margin-left:auto;">✕</button>
+        </div>
+        <div class="converter-body">
+          <div class="converter-toolbar">
+            <div class="converter-modes" id="converterModes">
+              <button type="button" class="conv-mode active" data-codec="url">URL</button>
+              <button type="button" class="conv-mode" data-codec="b64">Base64</button>
+              <button type="button" class="conv-mode" data-codec="hex">Hex</button>
+              <button type="button" class="conv-mode" data-codec="html">HTML</button>
+              <button type="button" class="conv-mode" data-codec="unicode">Unicode</button>
+              <button type="button" class="conv-mode" data-codec="ascii">ASCII</button>
+              <button type="button" class="conv-mode" data-codec="rot13">ROT13</button>
+              <button type="button" class="conv-mode" data-codec="reverse">Reverse</button>
+            </div>
+            <div class="converter-dir">
+              <button type="button" class="btn btn-sm btn-primary" id="converterEncode">Encode</button>
+              <button type="button" class="btn btn-sm" id="converterDecode">Decode</button>
+            </div>
+          </div>
+          <div class="converter-io">
+            <div class="converter-col">
+              <label class="converter-label">Input <small>selection = target</small></label>
+              <textarea id="converterInput" class="converter-ta" spellcheck="false" placeholder="Paste or load from Payload…"></textarea>
+            </div>
+            <div class="converter-col">
+              <label class="converter-label">Output</label>
+              <textarea id="converterOutput" class="converter-ta" spellcheck="false" placeholder="Result…"></textarea>
+            </div>
+          </div>
+          <div class="converter-actions">
+            <button type="button" class="btn btn-sm btn-ghost" id="converterFromPayload" title="Load selection or full payload">← From Payload</button>
+            <button type="button" class="btn btn-sm btn-ghost" id="converterSwap" title="Swap in ↔ out">⇅ Swap</button>
+            <button type="button" class="btn btn-sm" id="converterToPayload" title="Replace selection in Payload">→ To Payload</button>
+            <button type="button" class="btn btn-sm" id="converterAsLine" title="Append as new payload line(s)">+ As new line</button>
+            <button type="button" class="btn btn-sm btn-ghost" id="converterCopy">Copy</button>
+          </div>
+        </div>
       </div>
       <div id="postBodySection" class="post-body-section" style="display:none; margin-top:12px;">
         <div class="payload-label" style="margin-bottom:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -303,6 +510,7 @@
         </div>
         <div class="atk-picker-list" id="atkPickerList"></div>
         <div class="atk-picker-footer">
+          <button type="button" class="btn btn-sm btn-ghost" id="atkPickerDeleteSelected" title="Delete checked attacks" style="color:var(--danger);margin-right:auto;">Delete selected</button>
           <button type="button" class="btn btn-sm btn-ghost" id="atkPickerCancel">Cancel</button>
           <button type="button" class="btn btn-sm btn-primary" id="atkPickerApply">Show selected</button>
         </div>
@@ -312,30 +520,40 @@
 
   <!-- ===== VIRTUAL PANEL: Tools picker (right drawer — list only) ===== -->
   <div class="vpanel drawer-right tools-panel" id="toolsPanel" data-panel="tools">
-    <div class="vpanel-header">
+    <div class="vpanel-header" id="toolsDragHandle">
       <h2>Tools</h2>
       <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn" id="toolsPinBtn" title="Pin panel">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
     </div>
-    <div class="vpanel-body">
-      <p class="tools-picker-hint">Pick a tool — it opens as a floating panel (pin &amp; resize supported).</p>
-      <div class="tools-picker-list" id="toolsPickerList">
-        <button type="button" class="tools-picker-item" data-open-tool="cheatsheet">
-          <span class="tools-picker-icon">⌘</span>
-          <span class="tools-picker-text">
+    <div class="vpanel-body panel-body">
+      <div class="history-filters">
+        <div class="history-filter-row">
+          <input type="text" id="toolsSearch" class="history-search" placeholder="Search tools…" spellcheck="false" />
+        </div>
+        <div class="history-filter-row hf-chip-row" id="toolsChipRow">
+          <button type="button" class="hf-chip chip-all active" data-tools-filter="all">All</button>
+          <button type="button" class="hf-chip chip-rule" data-tools-filter="recon">Recon</button>
+          <button type="button" class="hf-chip chip-rule" data-tools-filter="network">Network</button>
+        </div>
+      </div>
+      <div class="tools-list" id="toolsPickerList">
+        <button type="button" class="tools-list-item" data-open-tool="cheatsheet" data-tools-cat="recon">
+          <div class="tools-list-top">
+            <span class="tools-list-badge badge-recon">Recon</span>
             <strong>Cheat Sheet</strong>
-            <small>SQLi payloads — multi-DB quick insert</small>
-          </span>
-          <span class="tools-picker-arrow">›</span>
+          </div>
+          <div class="tools-list-desc">Multi-DB functions, payloads, pin favorites</div>
+          <div class="tools-list-meta"><span>Open →</span></div>
         </button>
-        <button type="button" class="tools-picker-item" data-open-tool="proxy">
-          <span class="tools-picker-icon">⇄</span>
-          <span class="tools-picker-text">
+        <button type="button" class="tools-list-item" data-open-tool="proxy" data-tools-cat="network">
+          <div class="tools-list-top">
+            <span class="tools-list-badge badge-net">Network</span>
             <strong>Proxy</strong>
-            <small>Upstream proxy list, pin, traffic, ping</small>
-          </span>
-          <span class="tools-picker-arrow">›</span>
+          </div>
+          <div class="tools-list-desc">Upstream proxy, traffic stats, live ping</div>
+          <div class="tools-list-meta"><span>Open →</span></div>
         </button>
       </div>
     </div>
@@ -396,7 +614,6 @@
       </div>
       <div class="proxy-add-form">
         <input type="text" id="proxyUrlInput" class="proxy-input" placeholder="http://127.0.0.1:8080" spellcheck="false" />
-        <input type="text" id="proxyNoteInput" class="proxy-input proxy-note" placeholder="Note (e.g. Burp)" spellcheck="false" />
         <button type="button" class="btn btn-sm btn-primary" id="proxyAddBtn">Add</button>
       </div>
       <div class="proxy-hint">HTTP/HTTPS proxies (Burp, ZAP, …). Format: <code>http://host:port</code> or with auth <code>http://user:pass@host:port</code></div>
@@ -406,9 +623,18 @@
 
   <!-- ===== VIRTUAL PANEL: Settings ===== -->
   <div class="vpanel settings-modal" id="settingsPanel" data-panel="settings">
-    <div class="vpanel-header">
+    <div class="resize-grip n" data-resize="n"></div>
+    <div class="resize-grip s" data-resize="s"></div>
+    <div class="resize-grip e" data-resize="e"></div>
+    <div class="resize-grip w" data-resize="w"></div>
+    <div class="resize-grip ne" data-resize="ne"></div>
+    <div class="resize-grip nw" data-resize="nw"></div>
+    <div class="resize-grip se" data-resize="se"></div>
+    <div class="resize-grip sw" data-resize="sw"></div>
+    <div class="vpanel-header" id="settingsDragHandle">
       <h2>Settings</h2>
       <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn" id="settingsPinBtn" title="Pin panel">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
     </div>
