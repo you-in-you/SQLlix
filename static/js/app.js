@@ -1291,27 +1291,23 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       }
     }
     function openConverter() {
-      const ov = $('#converterOverlay');
-      const panel = $('#payloadWorkbench');
-      if (!ov) return;
       const input = $('#converterInput');
       if (payloadInput && payloadInput.selectionStart !== payloadInput.selectionEnd) {
         input.value = payloadInput.value.slice(payloadInput.selectionStart, payloadInput.selectionEnd);
       } else if (input && !input.value && payloadInput) {
         input.value = payloadInput.value;
       }
-      panel?.classList.add('converter-open');
-      ov.classList.add('open');
+      if (typeof openVPanel === 'function') openVPanel('converter');
+      else $('#converterPanel')?.classList.add('open');
       setTimeout(() => input?.focus(), 50);
     }
     function closeConverter() {
-      $('#converterOverlay')?.classList.remove('open');
-      $('#payloadWorkbench')?.classList.remove('converter-open');
+      if (typeof closeVPanel === 'function') closeVPanel('converter');
+      else $('#converterPanel')?.classList.remove('open');
     }
     (function bindConverter() {
       const btn = $('#converterBtn');
       if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); openConverter(); });
-      $('#converterClose')?.addEventListener('click', closeConverter);
       $$('#converterModes .conv-mode').forEach((b) => {
         b.addEventListener('click', () => {
           $$('#converterModes .conv-mode').forEach((x) => x.classList.remove('active'));
@@ -4603,8 +4599,9 @@ img, video, canvas { opacity: 0.9; }
       'adv-filter': '#advFilterPanel',
       'attack-dialog': '#attackNameDialog',
       'payload-lib': '#payloadLibPanel',
+      converter: '#converterPanel',
     };
-    const PINNABLE = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib']);
+    const PINNABLE = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib', 'converter']);
     const PIN_BTN_SEL = {
       payload: '#payloadPinBtn',
       history: '#historyPinBtn',
@@ -4613,6 +4610,7 @@ img, video, canvas { opacity: 0.9; }
       settings: '#settingsPinBtn',
       tools: '#toolsPinBtn',
       'payload-lib': '#payloadLibPinBtn',
+      converter: '#converterPinBtn',
     };
     const PIN_DEFAULTS = {
       payload: { top: '80px', right: '24px', width: '420px', height: '420px' },
@@ -4622,6 +4620,7 @@ img, video, canvas { opacity: 0.9; }
       settings: { top: '64px', left: Math.max(24, (window.innerWidth - 640) / 2) + 'px', width: Math.min(640, window.innerWidth * 0.92) + 'px', height: Math.min(window.innerHeight * 0.8, 700) + 'px' },
       tools: { top: '64px', right: '16px', width: '360px', height: Math.min(window.innerHeight * 0.7, 560) + 'px' },
       'payload-lib': { top: '96px', left: Math.max(24, (window.innerWidth - 400) / 2) + 'px', width: '400px', height: Math.min(window.innerHeight * 0.55, 480) + 'px' },
+      converter: { top: '72px', left: Math.max(24, (window.innerWidth - 640) / 2) + 'px', width: Math.min(640, window.innerWidth * 0.92) + 'px', height: Math.min(window.innerHeight * 0.65, 560) + 'px' },
     };
     const vpanelBackdrop = $('#vpanelBackdrop');
     let activeVPanel = null;
@@ -4656,7 +4655,7 @@ img, video, canvas { opacity: 0.9; }
     function unpinPanel(name) {
       const el = $(VPANEL_MAP[name]);
       if (!el) return;
-      el.classList.remove('pinned', 'panel-front');
+      el.classList.remove('pinned', 'panel-front', 'shelved');
       el.style.top = '';
       el.style.left = '';
       el.style.right = '';
@@ -4668,6 +4667,7 @@ img, video, canvas { opacity: 0.9; }
         pinBtn.classList.remove('active');
         pinBtn.innerHTML = neonPin(false, { label: 'Pin' });
       }
+      if (typeof updatePinTray === 'function') updatePinTray();
     }
 
     function openVPanel(name) {
@@ -4676,9 +4676,9 @@ img, video, canvas { opacity: 0.9; }
       const panel = $(sel);
       if (!panel) return;
 
-      // Pin = never auto-close. Work panels can stay under modals (settings opens on top of payload).
+      // Pin = never auto-close. Work panels stack (don't kill each other).
       const MODALS = new Set(['settings', 'adv-filter', 'attack-dialog']);
-      const WORK = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'tools']);
+      const WORK = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'tools', 'payload-lib', 'converter']);
 
       Object.keys(VPANEL_MAP).forEach((k) => {
         if (k === name) return;
@@ -4686,10 +4686,14 @@ img, video, canvas { opacity: 0.9; }
         if (!el || !el.classList.contains('open')) return;
         // Pinned panels never auto-close
         if (el.classList.contains('pinned')) return;
+        // Work tools stack on top of each other (Payload stays when Saved/Converter opens)
+        if (WORK.has(name) && WORK.has(k)) return;
         // Opening a modal: keep work panels underneath
         if (MODALS.has(name) && WORK.has(k)) return;
         el.classList.remove('open');
       });
+      // Bring panel out of shelf when opened
+      panel.classList.remove('shelved');
       $$('.nav-tool').forEach((b) => b.classList.remove('active'));
 
       panel.classList.add('open');
@@ -4720,6 +4724,7 @@ img, video, canvas { opacity: 0.9; }
       if (name === 'payload' && payloadInput) {
         setTimeout(() => payloadInput.focus(), 200);
       }
+      if (typeof updatePinTray === 'function') updatePinTray();
     }
 
     function closeVPanel(name) {
@@ -4736,7 +4741,9 @@ img, video, canvas { opacity: 0.9; }
         el.classList.remove('open');
         // Only unpin when that panel itself is being closed — pin means "don't auto-close"
         if (PINNABLE.has(k) && (!name || name === k)) unpinPanel(k);
+        if (el) el.classList.remove('shelved');
       });
+      if (typeof updatePinTray === 'function') updatePinTray();
 
       if (vpanelBackdrop) {
         const otherOpen = Object.keys(VPANEL_MAP).some((k) => {
@@ -4836,13 +4843,20 @@ img, video, canvas { opacity: 0.9; }
         pinBtn.innerHTML = neonPin(!!on, { label: on ? 'Pinned' : 'Pin' });
       }
       if (on) {
-        if (!panel.style.left && !panel.style.right && !panel.style.top) {
-          panel.style.top = defaults.top || '80px';
-          panel.style.left = defaults.left || 'auto';
+        // Always ensure pinned geometry (drawers otherwise stay full-height)
+        if (!panel.style.top) panel.style.top = defaults.top || '80px';
+        if (!panel.style.left && !panel.style.right) {
+          panel.style.left = defaults.left || '16px';
           panel.style.right = defaults.right || 'auto';
-          panel.style.width = defaults.width || '420px';
-          panel.style.height = defaults.height || '420px';
         }
+        if (!panel.style.width) panel.style.width = defaults.width || '360px';
+        if (!panel.style.height) panel.style.height = defaults.height || Math.min(window.innerHeight * 0.7, 620) + 'px';
+        // History drawer: force float metrics
+        if (name === 'history') {
+          panel.style.bottom = 'auto';
+          if (!panel.style.height) panel.style.height = Math.min(window.innerHeight * 0.7, 620) + 'px';
+        }
+        panel.classList.remove('shelved');
         if (vpanelBackdrop) vpanelBackdrop.classList.remove('open');
         const label = name === 'payload' ? 'Payload'
           : name === 'history' ? 'History'
@@ -4859,7 +4873,124 @@ img, video, canvas { opacity: 0.9; }
           vpanelBackdrop.classList.add('open');
         }
       }
+      updatePinTray();
     }
+
+    // ===== Pin tray + Alt+I shelf =====
+    const PIN_TRAY_LABELS = {
+      payload: 'Payload',
+      history: 'History',
+      cheatsheet: 'Cheats',
+      proxy: 'Proxy',
+      settings: 'Settings',
+      tools: 'Tools',
+      'payload-lib': 'Saved',
+      converter: 'Converter',
+    };
+    let pinShelfAll = false; // last Alt+I direction
+
+    function getPinnedPanelNames() {
+      return [...PINNABLE].filter((name) => {
+        const el = $(VPANEL_MAP[name]);
+        return el && el.classList.contains('pinned') && el.classList.contains('open');
+      });
+    }
+
+    function updatePinTray() {
+      const tray = $('#pinTray');
+      if (!tray) return;
+      const names = getPinnedPanelNames();
+      if (!names.length) {
+        tray.innerHTML = '';
+        return;
+      }
+      tray.innerHTML = names.map((name) => {
+        const el = $(VPANEL_MAP[name]);
+        const shelved = el?.classList.contains('shelved');
+        const label = PIN_TRAY_LABELS[name] || name;
+        return `<button type="button" class="pin-tray-item${shelved ? ' is-shelved' : ' is-active'}" data-pin-tray="${name}">${escapeHtml(label)}</button>`;
+      }).join('');
+      tray.querySelectorAll('[data-pin-tray]').forEach((btn) => {
+        btn.addEventListener('click', () => togglePinShelf(btn.dataset.pinTray));
+      });
+    }
+
+    function setPanelShelved(name, shelved) {
+      const el = $(VPANEL_MAP[name]);
+      if (!el || !el.classList.contains('pinned')) return;
+      el.classList.toggle('shelved', !!shelved);
+      if (!shelved) {
+        focusPanel(name);
+      }
+      updatePinTray();
+    }
+
+    function togglePinShelf(name) {
+      const el = $(VPANEL_MAP[name]);
+      if (!el || !el.classList.contains('pinned') || !el.classList.contains('open')) return;
+      setPanelShelved(name, !el.classList.contains('shelved'));
+    }
+
+    /** Alt+I — shelf/restore all pinned open panels */
+    document.addEventListener('keydown', (e) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key === 'i' || e.key === 'I') {
+        e.preventDefault();
+        toggleAllPinnedShelf();
+      } else if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault();
+        cyclePinnedPanels();
+      }
+    });
+
+    /** Alt+K — cycle pinned panels one-by-one (like Alt+Tab) */
+    function cyclePinnedPanels() {
+      const names = getPinnedPanelNames();
+      if (!names.length) {
+        showToast('No pinned panels');
+        return;
+      }
+      // Prefer order by current z-index (front-most last for stable cycle)
+      const ranked = names.slice().sort((a, b) => {
+        const za = parseInt($(VPANEL_MAP[a])?.style.zIndex || '0', 10) || 0;
+        const zb = parseInt($(VPANEL_MAP[b])?.style.zIndex || '0', 10) || 0;
+        return za - zb;
+      });
+      let cur = ranked.findIndex((n) => {
+        const el = $(VPANEL_MAP[n]);
+        return el && !el.classList.contains('shelved') && el.classList.contains('panel-front');
+      });
+      if (cur < 0) {
+        cur = ranked.findIndex((n) => {
+          const el = $(VPANEL_MAP[n]);
+          return el && !el.classList.contains('shelved');
+        });
+      }
+      const next = ranked[((cur < 0 ? 0 : cur) + 1) % ranked.length];
+      ranked.forEach((n) => {
+        const el = $(VPANEL_MAP[n]);
+        if (!el) return;
+        el.classList.toggle('shelved', n !== next);
+      });
+      focusPanel(next);
+      updatePinTray();
+      showToast(`Focus: ${PIN_TRAY_LABELS[next] || next}`, 'success');
+    }
+
+    function toggleAllPinnedShelf() {
+      const names = getPinnedPanelNames();
+      if (!names.length) {
+        showToast('No pinned panels');
+        return;
+      }
+      const anyVisible = names.some((n) => {
+        const el = $(VPANEL_MAP[n]);
+        return el && !el.classList.contains('shelved');
+      });
+      names.forEach((n) => setPanelShelved(n, anyVisible));
+      showToast(anyVisible ? 'Pinned panels shelved (Alt+I)' : 'Pinned panels restored', 'success');
+    }
+
 
     function setupPinnedDrag(panelSel, handleSel) {
       const handle = $(handleSel);
@@ -4932,7 +5063,7 @@ img, video, canvas { opacity: 0.9; }
       });
     }
 
-    ['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib'].forEach((name) => {
+    ['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib', 'converter'].forEach((name) => {
       const sel = PIN_BTN_SEL[name];
       const btn = sel ? $(sel) : null;
       if (!btn) return;
@@ -4948,6 +5079,7 @@ img, video, canvas { opacity: 0.9; }
     setupPinnedDrag('#cheatSheetPanel', '#cheatDragHandle');
     setupPinnedDrag('#proxyPanel', '#proxyDragHandle');
     setupPinnedDrag('#payloadLibPanel', '#payloadLibDragHandle');
+    setupPinnedDrag('#converterPanel', '#converterDragHandle');
     setupPinnedDrag('#settingsPanel', '#settingsDragHandle');
     setupPinnedDrag('#toolsPanel', '#toolsDragHandle');
     setupPinnedResize('#payloadWorkbench');
@@ -4955,6 +5087,7 @@ img, video, canvas { opacity: 0.9; }
     setupPinnedResize('#cheatSheetPanel');
     setupPinnedResize('#proxyPanel');
     setupPinnedResize('#payloadLibPanel');
+    setupPinnedResize('#converterPanel');
     setupPinnedResize('#settingsPanel');
     setupPinnedResize('#toolsPanel');
 
@@ -4965,7 +5098,7 @@ img, video, canvas { opacity: 0.9; }
       el.addEventListener('mousedown', (e) => {
         if (!el.classList.contains('open')) return;
         // Don't steal focus from nested interactive when closing
-        if (e.target.closest('[data-close-panel]')) return;
+        if (e.target.closest('[data-close-panel], .pin-btn, button')) return;
         focusPanel(name);
       }, true);
     });
@@ -6189,7 +6322,7 @@ img, video, canvas { opacity: 0.9; }
           cheatNav._ready = true;
         }
         // Neon icons on static Pin buttons
-      ['payloadPinBtn','historyPinBtn','cheatPinBtn','proxyPinBtn','settingsPinBtn','toolsPinBtn','payloadLibPinBtn'].forEach((id) => {
+      ['payloadPinBtn','historyPinBtn','cheatPinBtn','proxyPinBtn','settingsPinBtn','toolsPinBtn','payloadLibPinBtn','converterPinBtn'].forEach((id) => {
         const b = document.getElementById(id);
         if (b && typeof neonPin === 'function') b.innerHTML = neonPin(b.classList.contains('active'), { label: 'Pin' });
       });
@@ -6693,6 +6826,11 @@ img, video, canvas { opacity: 0.9; }
         ts: Date.now(),
       });
       savePayloadLibrary();
+      const saveBtn = $('#payloadSaveBtn');
+      if (saveBtn) {
+        saveBtn.classList.add('saved');
+        saveBtn.textContent = 'Saved';
+      }
       showToast('Payload saved', 'success');
     }
 
@@ -6707,6 +6845,13 @@ img, video, canvas { opacity: 0.9; }
       $('#payloadSaveBtn')?.addEventListener('click', (e) => {
         e.stopPropagation();
         saveCurrentPayloadToLibrary();
+      });
+      payloadInput?.addEventListener('input', () => {
+        const saveBtn = $('#payloadSaveBtn');
+        if (saveBtn?.classList.contains('saved')) {
+          saveBtn.classList.remove('saved');
+          saveBtn.textContent = 'Save';
+        }
       });
       $('#payloadLibSearch')?.addEventListener('input', renderPayloadLibrary);
     }

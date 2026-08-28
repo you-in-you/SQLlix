@@ -6122,19 +6122,31 @@
   z-index: 3;
   padding: 4px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(0,229,255,0.4);
-  background: rgba(0,229,255,0.1);
-  color: var(--accent-cyan);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.04);
+  color: var(--text-muted);
   font-size: 10px;
   font-weight: 700;
   font-family: var(--font-sans);
   cursor: pointer;
-  box-shadow: 0 0 10px rgba(0,229,255,0.15);
+  box-shadow: none;
   transition: all 0.15s ease;
 }
 .payload-save-btn:hover {
-  border-color: rgba(0,229,255,0.7);
-  background: rgba(0,229,255,0.18);
+  border-color: rgba(255,255,255,0.2);
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.06);
+}
+.payload-save-btn.saved {
+  border-color: rgba(0,230,118,0.55);
+  background: rgba(0,230,118,0.14);
+  color: #69f0ae;
+  box-shadow: 0 0 12px rgba(0,230,118,0.2);
+}
+.payload-save-btn.saved:hover {
+  border-color: rgba(0,230,118,0.75);
+  background: rgba(0,230,118,0.2);
+  color: #b9f6ca;
 }
 /* Saved payloads is an independent vpanel now */
 #payloadLibPanel.float-center {
@@ -6250,4 +6262,113 @@
 .payload-lib-toolbar .payload-lib-search { flex: 1; width: 100%; }
 #payloadLibPanel.pinned {
   max-height: none !important;
+}
+
+
+/* Converter as independent panel */
+#converterPanel.float-center {
+  width: min(640px, 94vw);
+  max-height: min(72vh, 620px);
+}
+#converterPanel .converter-io {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  min-height: 160px;
+}
+#converterPanel .converter-ta {
+  min-height: 120px;
+  flex: 1;
+}
+#converterPanel.pinned { max-height: none !important; }
+
+/* Shelved pinned panels (Alt+I / tray) — keep geometry, hide off interaction */
+.vpanel.pinned.shelved {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  /* keep layout position in memory via inline styles */
+}
+
+/* Pin tray in statusbar (Windows-like) */
+.response-statusbar {
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+}
+.pin-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+  align-items: center;
+  min-height: 22px;
+}
+.pin-tray:empty { display: none; }
+.pin-tray-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(0,229,255,0.35);
+  background: rgba(0,229,255,0.08);
+  color: var(--accent-cyan);
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  letter-spacing: 0.02em;
+}
+.pin-tray-item:hover {
+  border-color: rgba(0,229,255,0.65);
+  box-shadow: 0 0 12px rgba(0,229,255,0.2);
+  background: rgba(0,229,255,0.14);
+}
+.pin-tray-item.is-shelved {
+  border-color: var(--border);
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.03);
+  opacity: 0.75;
+}
+.pin-tray-item.is-active {
+  box-shadow: 0 0 14px rgba(0,229,255,0.25);
+  border-color: rgba(0,229,255,0.7);
+}
+
+
+/* vpanel header overflow fix */
+.vpanel-header {
+  min-width: 0;
+  flex-wrap: nowrap;
+}
+.vpanel-header h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vpanel-header-actions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  max-width: 70%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.vpanel-header-actions .pin-btn,
+.vpanel-header-actions .btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+#historyPanel .vpanel-header-actions {
+  max-width: 75%;
+}
+/* History pinned: ensure real floating window, not full-height drawer */
+#historyPanel.pinned.open {
+  bottom: auto !important;
+  max-height: none !important;
+  height: var(--hist-pin-h, min(70vh, 620px));
 }

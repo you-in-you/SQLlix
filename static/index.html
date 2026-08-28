@@ -207,6 +207,7 @@
             <span>Time: <strong id="sbTime">—</strong></span>
             <span>Size: <strong id="sbSize">—</strong></span>
             <span>Type: <strong id="sbType">—</strong></span>
+            <div class="pin-tray" id="pinTray" title="Pinned panels — click to show/hide · Alt+I shelf all"></div>
           </div>
         </section>
       </div>
@@ -360,49 +361,6 @@
         <button id="injectBtn" class="btn btn-sm" style="margin-left:auto; border-color:var(--accent); color:var(--accent);">
           Inject into Target
         </button>
-      </div>
-      <!-- Converter overlay (on top of Payload) -->
-      <div class="converter-overlay" id="converterOverlay">
-        <div class="converter-header">
-          <strong>Converter</strong>
-          <span class="converter-hint">Select text in Input → only that part converts · each line separate</span>
-          <button type="button" class="btn btn-sm" id="converterClose" style="margin-left:auto;">✕</button>
-        </div>
-        <div class="converter-body">
-          <div class="converter-toolbar">
-            <div class="converter-modes" id="converterModes">
-              <button type="button" class="conv-mode active" data-codec="url">URL</button>
-              <button type="button" class="conv-mode" data-codec="b64">Base64</button>
-              <button type="button" class="conv-mode" data-codec="hex">Hex</button>
-              <button type="button" class="conv-mode" data-codec="html">HTML</button>
-              <button type="button" class="conv-mode" data-codec="unicode">Unicode</button>
-              <button type="button" class="conv-mode" data-codec="ascii">ASCII</button>
-              <button type="button" class="conv-mode" data-codec="rot13">ROT13</button>
-              <button type="button" class="conv-mode" data-codec="reverse">Reverse</button>
-            </div>
-            <div class="converter-dir">
-              <button type="button" class="btn btn-sm btn-primary" id="converterEncode">Encode</button>
-              <button type="button" class="btn btn-sm" id="converterDecode">Decode</button>
-            </div>
-          </div>
-          <div class="converter-io">
-            <div class="converter-col">
-              <label class="converter-label">Input <small>selection = target</small></label>
-              <textarea id="converterInput" class="converter-ta" spellcheck="false" placeholder="Paste or load from Payload…"></textarea>
-            </div>
-            <div class="converter-col">
-              <label class="converter-label">Output</label>
-              <textarea id="converterOutput" class="converter-ta" spellcheck="false" placeholder="Result…"></textarea>
-            </div>
-          </div>
-          <div class="converter-actions">
-            <button type="button" class="btn btn-sm btn-ghost" id="converterFromPayload" title="Load selection or full payload">← From Payload</button>
-            <button type="button" class="btn btn-sm btn-ghost" id="converterSwap" title="Swap in ↔ out">⇅ Swap</button>
-            <button type="button" class="btn btn-sm" id="converterToPayload" title="Replace selection in Payload">→ To Payload</button>
-            <button type="button" class="btn btn-sm" id="converterAsLine" title="Append as new payload line(s)">+ As new line</button>
-            <button type="button" class="btn btn-sm btn-ghost" id="converterCopy">Copy</button>
-          </div>
-        </div>
       </div>
       <div id="postBodySection" class="post-body-section" style="display:none; margin-top:12px;">
         <div class="payload-label" style="margin-bottom:6px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -630,7 +588,63 @@
   <!-- ===== VIRTUAL PANEL: Settings ===== -->
   
   <!-- ===== Saved Payloads (independent float — pin / resize) ===== -->
-  <div class="vpanel float-center tool-float" id="payloadLibPanel" data-panel="payload-lib">
+  
+  <!-- ===== Converter (independent float — pin / resize) ===== -->
+  <div class="vpanel float-center tool-float" id="converterPanel" data-panel="converter">
+    <div class="resize-grip n" data-resize="n"></div>
+    <div class="resize-grip s" data-resize="s"></div>
+    <div class="resize-grip e" data-resize="e"></div>
+    <div class="resize-grip w" data-resize="w"></div>
+    <div class="resize-grip ne" data-resize="ne"></div>
+    <div class="resize-grip nw" data-resize="nw"></div>
+    <div class="resize-grip se" data-resize="se"></div>
+    <div class="resize-grip sw" data-resize="sw"></div>
+    <div class="vpanel-header" id="converterDragHandle">
+      <h2>Converter</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn" id="converterPinBtn" title="Pin panel">Pin</button>
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body" style="padding:12px;display:flex;flex-direction:column;gap:10px;min-height:0;overflow:hidden;">
+      <p class="converter-hint" style="margin:0;">Select text in Input → only that part converts · each line separate</p>
+      <div class="converter-toolbar">
+        <div class="converter-modes" id="converterModes">
+          <button type="button" class="conv-mode active" data-codec="url">URL</button>
+          <button type="button" class="conv-mode" data-codec="b64">Base64</button>
+          <button type="button" class="conv-mode" data-codec="hex">Hex</button>
+          <button type="button" class="conv-mode" data-codec="html">HTML</button>
+          <button type="button" class="conv-mode" data-codec="unicode">Unicode</button>
+          <button type="button" class="conv-mode" data-codec="ascii">ASCII</button>
+          <button type="button" class="conv-mode" data-codec="rot13">ROT13</button>
+          <button type="button" class="conv-mode" data-codec="reverse">Reverse</button>
+        </div>
+        <div class="converter-dir">
+          <button type="button" class="btn btn-sm btn-primary" id="converterEncode">Encode</button>
+          <button type="button" class="btn btn-sm" id="converterDecode">Decode</button>
+        </div>
+      </div>
+      <div class="converter-io" style="flex:1;min-height:0;">
+        <div class="converter-col">
+          <label class="converter-label">Input <small>selection = target</small></label>
+          <textarea id="converterInput" class="converter-ta" spellcheck="false" placeholder="Paste or load from Payload…"></textarea>
+        </div>
+        <div class="converter-col">
+          <label class="converter-label">Output</label>
+          <textarea id="converterOutput" class="converter-ta" spellcheck="false" placeholder="Result…"></textarea>
+        </div>
+      </div>
+      <div class="converter-actions">
+        <button type="button" class="btn btn-sm btn-ghost" id="converterFromPayload" title="Load selection or full payload">← From Payload</button>
+        <button type="button" class="btn btn-sm btn-ghost" id="converterSwap" title="Swap in ↔ out">⇅ Swap</button>
+        <button type="button" class="btn btn-sm" id="converterToPayload" title="Replace selection in Payload">→ To Payload</button>
+        <button type="button" class="btn btn-sm" id="converterAsLine" title="Append as new payload line(s)">+ As new line</button>
+        <button type="button" class="btn btn-sm btn-ghost" id="converterCopy">Copy</button>
+      </div>
+    </div>
+  </div>
+
+<div class="vpanel float-center tool-float" id="payloadLibPanel" data-panel="payload-lib">
     <div class="resize-grip n" data-resize="n"></div>
     <div class="resize-grip s" data-resize="s"></div>
     <div class="resize-grip e" data-resize="e"></div>
