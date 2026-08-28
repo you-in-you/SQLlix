@@ -58,6 +58,12 @@
 
   <!-- Backdrop for virtual panels -->
   <div class="vpanel-backdrop" id="vpanelBackdrop"></div>
+  <div class="backend-offline-float" id="backendOfflineFloat" hidden>
+    <span class="bof-dot"></span>
+    <span class="bof-text"><strong>Backend offline</strong> — start Flask on :5000</span>
+    <button type="button" class="bof-retry" id="backendRetryBtn">Retry</button>
+    <button type="button" class="bof-x" id="backendFloatDismiss" title="Hide for now">×</button>
+  </div>
 
   <!-- ===== MAIN LAYOUT — Response only ===== -->
   <div class="main-layout">
@@ -178,13 +184,11 @@
                   </div>
                 </div>
 
-                <footer class="w-bottom">
-                  <span class="w-pulse"></span>
-                  <span>Ready</span>
+                <footer class="w-bottom" id="wBackendStatus">
+                  <span class="w-pulse" id="wBackendDot"></span>
+                  <span id="wBackendLabel">Checking backend…</span>
                   <span class="w-sep">/</span>
-                  <span>No target loaded</span>
-                  <span class="w-sep">/</span>
-                  <span>Rendered view waits for your first request</span>
+                  <span id="wBackendDetail">ping /api/health</span>
                 </footer>
               </div>
             </div>
@@ -223,6 +227,7 @@
       <h2>Payload Workbench</h2>
       <div class="vpanel-header-actions">
         <button type="button" class="night-protect-btn" id="payloadHeadersBtn" title="Open request headers settings" style="padding:4px 8px;font-size:11px;">☰ Headers</button>
+        <button type="button" class="night-protect-btn" id="payloadLibraryBtn" title="Saved payloads" style="padding:4px 8px;font-size:11px;">◈ Saved</button>
         <button type="button" class="pin-btn" id="payloadPinBtn" title="Pin panel — keep open while working">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
@@ -233,6 +238,7 @@
           placeholder="' OR '1'='1' -- -&#10;order by {1..10}&#10;UNION SELECT {1,2,3,4,5}" spellcheck="false"
           title="Each line maps to $1, $2, $3... · Use {1..10} or {1,2,3} for batch attack"
           style="min-height:88px;max-height:180px;"></textarea>
+        <button type="button" class="payload-save-btn" id="payloadSaveBtn" title="Save payload to library">Save</button>
         <div id="autocompleteBox" class="autocomplete-box hidden"></div>
       </div>
       <div id="attackConfigPanel" class="attack-config-panel hidden">
@@ -622,7 +628,35 @@
   </div>
 
   <!-- ===== VIRTUAL PANEL: Settings ===== -->
-  <div class="vpanel settings-modal" id="settingsPanel" data-panel="settings">
+  
+  <!-- ===== Saved Payloads (independent float — pin / resize) ===== -->
+  <div class="vpanel float-center tool-float" id="payloadLibPanel" data-panel="payload-lib">
+    <div class="resize-grip n" data-resize="n"></div>
+    <div class="resize-grip s" data-resize="s"></div>
+    <div class="resize-grip e" data-resize="e"></div>
+    <div class="resize-grip w" data-resize="w"></div>
+    <div class="resize-grip ne" data-resize="ne"></div>
+    <div class="resize-grip nw" data-resize="nw"></div>
+    <div class="resize-grip se" data-resize="se"></div>
+    <div class="resize-grip sw" data-resize="sw"></div>
+    <div class="vpanel-header" id="payloadLibDragHandle">
+      <h2>Saved Payloads</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn" id="payloadLibPinBtn" title="Pin panel">Pin</button>
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body panel-body" style="padding:0;display:flex;flex-direction:column;min-height:0;">
+      <div class="payload-lib-toolbar">
+        <input type="search" id="payloadLibSearch" class="payload-lib-search" placeholder="Search saved payloads…" spellcheck="false" />
+      </div>
+      <div class="payload-lib-body" id="payloadLibBody">
+        <div class="payload-lib-empty">No saved payloads yet. Write a payload and hit Save.</div>
+      </div>
+    </div>
+  </div>
+
+<div class="vpanel settings-modal" id="settingsPanel" data-panel="settings">
     <div class="resize-grip n" data-resize="n"></div>
     <div class="resize-grip s" data-resize="s"></div>
     <div class="resize-grip e" data-resize="e"></div>

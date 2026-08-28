@@ -4602,8 +4602,9 @@ img, video, canvas { opacity: 0.9; }
       settings: '#settingsPanel',
       'adv-filter': '#advFilterPanel',
       'attack-dialog': '#attackNameDialog',
+      'payload-lib': '#payloadLibPanel',
     };
-    const PINNABLE = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools']);
+    const PINNABLE = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib']);
     const PIN_BTN_SEL = {
       payload: '#payloadPinBtn',
       history: '#historyPinBtn',
@@ -4611,6 +4612,7 @@ img, video, canvas { opacity: 0.9; }
       proxy: '#proxyPinBtn',
       settings: '#settingsPinBtn',
       tools: '#toolsPinBtn',
+      'payload-lib': '#payloadLibPinBtn',
     };
     const PIN_DEFAULTS = {
       payload: { top: '80px', right: '24px', width: '420px', height: '420px' },
@@ -4619,6 +4621,7 @@ img, video, canvas { opacity: 0.9; }
       proxy: { top: '72px', left: '12%', width: '520px', height: Math.min(window.innerHeight * 0.75, 620) + 'px' },
       settings: { top: '64px', left: Math.max(24, (window.innerWidth - 640) / 2) + 'px', width: Math.min(640, window.innerWidth * 0.92) + 'px', height: Math.min(window.innerHeight * 0.8, 700) + 'px' },
       tools: { top: '64px', right: '16px', width: '360px', height: Math.min(window.innerHeight * 0.7, 560) + 'px' },
+      'payload-lib': { top: '96px', left: Math.max(24, (window.innerWidth - 400) / 2) + 'px', width: '400px', height: Math.min(window.innerHeight * 0.55, 480) + 'px' },
     };
     const vpanelBackdrop = $('#vpanelBackdrop');
     let activeVPanel = null;
@@ -4929,7 +4932,7 @@ img, video, canvas { opacity: 0.9; }
       });
     }
 
-    ['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools'].forEach((name) => {
+    ['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib'].forEach((name) => {
       const sel = PIN_BTN_SEL[name];
       const btn = sel ? $(sel) : null;
       if (!btn) return;
@@ -4944,12 +4947,14 @@ img, video, canvas { opacity: 0.9; }
     setupPinnedDrag('#historyPanel', '#historyDragHandle');
     setupPinnedDrag('#cheatSheetPanel', '#cheatDragHandle');
     setupPinnedDrag('#proxyPanel', '#proxyDragHandle');
+    setupPinnedDrag('#payloadLibPanel', '#payloadLibDragHandle');
     setupPinnedDrag('#settingsPanel', '#settingsDragHandle');
     setupPinnedDrag('#toolsPanel', '#toolsDragHandle');
     setupPinnedResize('#payloadWorkbench');
     setupPinnedResize('#historyPanel');
     setupPinnedResize('#cheatSheetPanel');
     setupPinnedResize('#proxyPanel');
+    setupPinnedResize('#payloadLibPanel');
     setupPinnedResize('#settingsPanel');
     setupPinnedResize('#toolsPanel');
 
@@ -6184,7 +6189,7 @@ img, video, canvas { opacity: 0.9; }
           cheatNav._ready = true;
         }
         // Neon icons on static Pin buttons
-      ['payloadPinBtn','historyPinBtn','cheatPinBtn','proxyPinBtn','settingsPinBtn','toolsPinBtn'].forEach((id) => {
+      ['payloadPinBtn','historyPinBtn','cheatPinBtn','proxyPinBtn','settingsPinBtn','toolsPinBtn','payloadLibPinBtn'].forEach((id) => {
         const b = document.getElementById(id);
         if (b && typeof neonPin === 'function') b.innerHTML = neonPin(b.classList.contains('active'), { label: 'Pin' });
       });
@@ -6489,8 +6494,227 @@ img, video, canvas { opacity: 0.9; }
       updateAtkStopSummary();
     })();
 
+
+    // ===== Backend health (ping /api/health every 10s) =====
+    const backendHealth = {
+      online: null, // null=unknown, true/false
+      lastMs: null,
+      timer: null,
+      floatDismissed: false,
+    };
+
+    async function checkBackendHealth() {
+      const base = typeof apiBaseUrl === 'function' ? apiBaseUrl() : 'http://127.0.0.1:5000';
+      const t0 = performance.now();
+      let online = false;
+      let detail = '';
+      try {
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 3500);
+        const res = await fetch(`${base}/api/health`, { method: 'GET', signal: ctrl.signal, cache: 'no-store' });
+        clearTimeout(to);
+        online = res.ok;
+        const ms = Math.round(performance.now() - t0);
+        backendHealth.lastMs = ms;
+        detail = online ? `${ms} ms` : `HTTP ${res.status}`;
+      } catch {
+        online = false;
+        backendHealth.lastMs = null;
+        detail = 'unreachable';
+      }
+      const prev = backendHealth.online;
+      backendHealth.online = online;
+      updateBackendStatusUI();
+      // Show floating neon banner only on transition to offline (or stay offline)
+      if (!online) {
+        if (!backendHealth.floatDismissed) showBackendOfflineFloat();
+      } else {
+        backendHealth.floatDismissed = false;
+        hideBackendOfflineFloat();
+      }
+      return online;
+    }
+
+    function updateBackendStatusUI() {
+      const foot = $('#wBackendStatus');
+      const label = $('#wBackendLabel');
+      const detail = $('#wBackendDetail');
+      if (!foot) return;
+      foot.classList.remove('is-online', 'is-offline', 'is-checking');
+      if (backendHealth.online === null) {
+        foot.classList.add('is-checking');
+        if (label) label.textContent = 'Checking backend…';
+        if (detail) detail.textContent = 'ping /api/health';
+      } else if (backendHealth.online) {
+        foot.classList.add('is-online');
+        if (label) label.textContent = 'Backend online';
+        if (detail) detail.textContent = backendHealth.lastMs != null ? `${backendHealth.lastMs} ms · :5000` : 'ok · :5000';
+      } else {
+        foot.classList.add('is-offline');
+        if (label) label.textContent = 'Backend offline';
+        if (detail) detail.textContent = 'start app.py on :5000';
+      }
+    }
+
+    function showBackendOfflineFloat() {
+      const el = $('#backendOfflineFloat');
+      if (el) el.hidden = false;
+    }
+    function hideBackendOfflineFloat() {
+      const el = $('#backendOfflineFloat');
+      if (el) el.hidden = true;
+    }
+
+    function startBackendHealthLoop() {
+      if (backendHealth.timer) clearInterval(backendHealth.timer);
+      checkBackendHealth();
+      backendHealth.timer = setInterval(checkBackendHealth, 10000);
+      $('#backendRetryBtn')?.addEventListener('click', () => {
+        backendHealth.floatDismissed = false;
+        checkBackendHealth();
+      });
+      $('#backendFloatDismiss')?.addEventListener('click', () => {
+        backendHealth.floatDismissed = true;
+        hideBackendOfflineFloat();
+      });
+    }
+
+    // ===== Payload library (manual save only, persisted) =====
+    const PAYLOAD_LIB_KEY = 'sqllix-payload-library';
+    let payloadLibrary = [];
+
+    function loadPayloadLibrary() {
+      try {
+        const raw = localStorage.getItem(PAYLOAD_LIB_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        payloadLibrary = Array.isArray(arr) ? arr : [];
+      } catch { payloadLibrary = []; }
+    }
+    function savePayloadLibrary() {
+      try { localStorage.setItem(PAYLOAD_LIB_KEY, JSON.stringify(payloadLibrary)); } catch {}
+    }
+
+    function openPayloadLibrary() {
+      if (typeof openVPanel === 'function') openVPanel('payload-lib');
+      else {
+        const el = $('#payloadLibPanel');
+        if (el) el.classList.add('open');
+      }
+      renderPayloadLibrary();
+      setTimeout(() => $('#payloadLibSearch')?.focus(), 40);
+    }
+    function closePayloadLibrary() {
+      if (typeof closeVPanel === 'function') closeVPanel('payload-lib');
+      else $('#payloadLibPanel')?.classList.remove('open');
+    }
+
+    function renderPayloadLibrary() {
+      const body = $('#payloadLibBody');
+      if (!body) return;
+      const q = ($('#payloadLibSearch')?.value || '').trim().toLowerCase();
+      let list = [...payloadLibrary];
+      // pinned first
+      list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) || (b.ts || 0) - (a.ts || 0));
+      if (q) {
+        list = list.filter((p) =>
+          (p.name || '').toLowerCase().includes(q) ||
+          (p.text || '').toLowerCase().includes(q)
+        );
+      }
+      if (!list.length) {
+        body.innerHTML = `<div class="payload-lib-empty">${payloadLibrary.length ? 'No matches.' : 'No saved payloads yet. Write a payload and hit Save.'}</div>`;
+        return;
+      }
+      body.innerHTML = list.map((p) => {
+        const preview = escapeHtml((p.text || '').split('\n').slice(0, 3).join('\n')).slice(0, 180);
+        return `
+          <div class="payload-lib-item${p.pinned ? ' pinned' : ''}" data-id="${escapeHtml(p.id)}">
+            <div class="payload-lib-top">
+              <span class="payload-lib-name" title="${escapeHtml(p.name || '')}">${p.pinned ? '★ ' : ''}${escapeHtml(p.name || 'Untitled')}</span>
+              <div class="payload-lib-actions">
+                <button type="button" data-act="pin" title="Pin">${p.pinned ? '★' : '☆'}</button>
+                <button type="button" data-act="del" class="danger" title="Delete">×</button>
+              </div>
+            </div>
+            <div class="payload-lib-preview">${preview || '<i>empty</i>'}</div>
+          </div>`;
+      }).join('');
+
+      body.querySelectorAll('.payload-lib-item').forEach((el) => {
+        el.addEventListener('click', (e) => {
+          if (e.target.closest('button')) return;
+          const id = el.dataset.id;
+          const item = payloadLibrary.find((x) => x.id === id);
+          if (!item || !payloadInput) return;
+          payloadInput.value = item.text || '';
+          if (typeof updatePayloadSummary === 'function') updatePayloadSummary();
+          if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
+          closePayloadLibrary();
+          showToast('Payload loaded', 'success');
+        });
+        el.querySelector('[data-act="pin"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = el.dataset.id;
+          const item = payloadLibrary.find((x) => x.id === id);
+          if (!item) return;
+          item.pinned = !item.pinned;
+          savePayloadLibrary();
+          renderPayloadLibrary();
+        });
+        el.querySelector('[data-act="del"]')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = el.dataset.id;
+          const item = payloadLibrary.find((x) => x.id === id);
+          if (!item) return;
+          if (!confirm(`Delete saved payload "${item.name || 'Untitled'}"?`)) return;
+          payloadLibrary = payloadLibrary.filter((x) => x.id !== id);
+          savePayloadLibrary();
+          renderPayloadLibrary();
+          showToast('Deleted', 'success');
+        });
+      });
+    }
+
+    function saveCurrentPayloadToLibrary() {
+      const text = (payloadInput?.value || '');
+      if (!text.trim()) {
+        showToast('Payload is empty');
+        return;
+      }
+      const first = text.trim().split('\n')[0].slice(0, 48);
+      let name = prompt('Name for this payload:', first || 'Payload');
+      if (name === null) return;
+      name = (name || '').trim() || first || 'Payload';
+      payloadLibrary.unshift({
+        id: 'pl-' + Date.now().toString(36),
+        name,
+        text,
+        pinned: false,
+        ts: Date.now(),
+      });
+      savePayloadLibrary();
+      showToast('Payload saved', 'success');
+    }
+
+    function bindPayloadLibraryUI() {
+      loadPayloadLibrary();
+      $('#payloadLibraryBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const el = $('#payloadLibPanel');
+        if (el?.classList.contains('open')) closePayloadLibrary();
+        else openPayloadLibrary();
+      });
+      $('#payloadSaveBtn')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        saveCurrentPayloadToLibrary();
+      });
+      $('#payloadLibSearch')?.addEventListener('input', renderPayloadLibrary);
+    }
+
     // ===== Init =====
     function init() {
+      startBackendHealthLoop();
+      bindPayloadLibraryUI();
       initAppearanceControls();
       // Night Protect defaults from localStorage
       npConfig = loadNpConfig();
