@@ -5936,3 +5936,104 @@
   40% { opacity: 1; transform: translate(var(--sx), var(--sy)) scale(1.2); }
   100% { opacity: 0; transform: translate(calc(var(--sx) * 1.6), calc(var(--sy) * 1.6)) scale(0.2); }
 }
+
+
+/* Critical: welcome must actually hide after first response */
+#tab-rendered > .rendered-placeholder.welcome-neon.hidden,
+.rendered-placeholder.welcome-neon.hidden {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  opacity: 0 !important;
+}
+
+/* Raw / Headers tabs fill panel — no black dead zone */
+.tab-content.active {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  opacity: 1 !important;
+  transform: none !important;
+}
+#tab-raw .raw-response {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+  height: 100% !important;
+}
+#tab-headers .meta-table-wrap {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+  height: 100% !important;
+}
+#tab-rendered:not(:has(.rendered-placeholder:not(.hidden))) #rendered-frame:not(.hidden),
+#tab-rendered #rendered-frame:not(.hidden) {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  display: block !important;
+}
+
+
+/* Orbit border — rounded corners + extra hues (card body does not spin) */
+.w-card {
+  --w-angle: 0deg;
+  border: 1.5px solid rgba(255,255,255,0.08) !important;
+  background-color: rgba(12, 14, 18, 0.72) !important;
+  background-image: none;
+  background-origin: border-box;
+  background-clip: padding-box;
+  overflow: hidden;
+}
+.w-card::before {
+  /* disable old mask ring */
+  content: none !important;
+  display: none !important;
+}
+.w-card:hover {
+  border-color: transparent !important;
+  background-color: transparent !important;
+  background-image:
+    linear-gradient(160deg, rgba(16, 20, 28, 0.96), rgba(12, 14, 18, 0.96)),
+    conic-gradient(
+      from var(--w-angle),
+      #ff4d9a 0%,
+      #c084ff 14%,
+      #7c5cff 28%,
+      #38bdf8 42%,
+      #34d399 56%,
+      #ff7ac8 70%,
+      #e879f9 84%,
+      #ff4d9a 100%
+    ) !important;
+  background-origin: border-box !important;
+  background-clip: padding-box, border-box !important;
+  animation: wOrbit 2.6s linear infinite !important;
+  box-shadow:
+    0 16px 40px rgba(0,0,0,0.35),
+    0 0 28px rgba(255,100,180,0.1) !important;
+}
+.w-card-lg:hover {
+  background-image:
+    linear-gradient(160deg, rgba(0,229,255,0.08), rgba(12, 14, 18, 0.96) 42%),
+    conic-gradient(
+      from var(--w-angle),
+      #ff4d9a 0%,
+      #c084ff 14%,
+      #7c5cff 28%,
+      #38bdf8 42%,
+      #34d399 56%,
+      #ff7ac8 70%,
+      #e879f9 84%,
+      #ff4d9a 100%
+    ) !important;
+  background-origin: border-box !important;
+  background-clip: padding-box, border-box !important;
+}
+@keyframes wOrbit {
+  to { --w-angle: 360deg; }
+}

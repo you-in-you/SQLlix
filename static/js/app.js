@@ -3336,8 +3336,14 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
 
     // ===== Response Display =====
     function clearResponseView() {
-      renderedPlaceholder.classList.remove('hidden');
-      renderedFrame.classList.add('hidden');
+      if (renderedPlaceholder) {
+        renderedPlaceholder.classList.remove('hidden');
+        renderedPlaceholder.style.display = '';
+      }
+      if (renderedFrame) {
+        renderedFrame.classList.add('hidden');
+        renderedFrame.style.display = '';
+      }
       renderedFrame.srcdoc = '';
       state.lastRenderedHtml = '';
       rawResponse.innerHTML = 'No response data.';
@@ -3414,15 +3420,21 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       // Inject interaction bridge so links/forms work through our proxy
       htmlToRender = injectInteractionBridge(htmlToRender, targetUrl);
 
-      renderedPlaceholder.classList.add('hidden');
-      renderedFrame.classList.remove('hidden');
+      if (renderedPlaceholder) {
+        renderedPlaceholder.classList.add('hidden');
+        renderedPlaceholder.style.display = 'none';
+      }
+      if (renderedFrame) {
+        renderedFrame.classList.remove('hidden');
+        renderedFrame.style.display = 'block';
+      }
       // Store for Expand modal (always latest)
       state.lastRenderedHtml = htmlToRender;
 
       // Clear then set (next frame) so browser always repaints after navigation
       renderedFrame.removeAttribute('srcdoc');
       requestAnimationFrame(() => {
-        renderedFrame.srcdoc = htmlToRender;
+        renderedFrame.srcdoc = htmlToRender || '<pre style="color:#ccc;padding:16px;font:12px monospace;">Empty response body</pre>';
       });
 
       // If expand modal is open on rendered tab, refresh it too
