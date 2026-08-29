@@ -40,6 +40,7 @@
       --transition: 0.16s ease;
       --cheat-width: 280px;
       --history-width: 250px;
+      --topbar-h: 56px; /* synced by JS from .top-bar height */
       --space-xs: 4px;
       --space-sm: 8px;
       --space-md: 12px;
@@ -208,9 +209,9 @@
       flex-direction: column;
     }
 
-    /* Right drawer */
+    /* Right drawer — starts BELOW top-bar so header (Pin / New tab) is visible */
     .vpanel.drawer-right {
-      top: 0;
+      top: var(--topbar-h, 56px);
       right: 0;
       bottom: 0;
       width: min(400px, 94vw);
@@ -220,9 +221,9 @@
     }
     .vpanel.drawer-right.open { transform: translateX(0); }
 
-    /* Left drawer */
+    /* Left drawer — starts BELOW top-bar so header is not covered by .top-bar (z-index 500) */
     .vpanel.drawer-left {
-      top: 0;
+      top: var(--topbar-h, 56px);
       left: 0;
       bottom: 0;
       width: min(380px, 94vw);
@@ -1951,12 +1952,27 @@
     .cookie-import-actions .btn-primary {
       border-color: rgba(255, 217, 61, 0.5) !important;
     }
-    /* Expand settings while Cookie Manager is open */
+    /* Expand settings while Cookie Manager is open — stay inside viewport, header always clickable */
     #settingsPanel.cookie-mgr-open {
       width: min(720px, 96vw) !important;
       max-width: 96vw;
-      height: min(88vh, 820px) !important;
-      max-height: 92vh;
+      height: min(80vh, 720px) !important;
+      max-height: min(80vh, 720px) !important;
+      top: 50% !important;
+      transform: translate(-50%, -50%) scale(1) !important;
+      overflow: hidden;
+    }
+    #settingsPanel.cookie-mgr-open .vpanel-header {
+      flex-shrink: 0;
+      position: relative;
+      z-index: 8;
+    }
+    #settingsPanel.cookie-mgr-open .vpanel-body {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
     }
     .cookie-mgr-overlay {
       display: none;
@@ -1966,6 +1982,8 @@
       background: var(--bg-secondary);
       flex-direction: column;
       min-height: 0;
+      max-height: 100%;
+      overflow: hidden;
     }
     .cookie-mgr-overlay.open { display: flex; }
     .ck-note-toggle {
@@ -4770,8 +4788,7 @@
       padding: 10px 12px;
       border-top: 1px solid var(--border);
     }
-    #attackConfigPanel { position: relative; }
-
+    /* attackConfigPanel is float-center vpanel — do not force position:relative */
 
     /* ===== Welcome v2 — meta-table inspired ===== */
     .rendered-placeholder.welcome-neon {
@@ -4886,11 +4903,28 @@
 
 
 /* ===== Welcome layout fix (full panel, no cram) ===== */
+/* Only show when .active — bare display:flex left a black void over Raw/Headers */
 #tab-rendered {
-  display: flex;
+  display: none;
   flex-direction: column;
   min-height: 0;
-  height: 100%;
+  height: auto;
+}
+#tab-rendered.tab-content.active {
+  display: flex !important;
+}
+#tab-raw.tab-content.active,
+#tab-headers.tab-content.active {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: flex-start !important;
+}
+#tab-raw .raw-response,
+#tab-headers .meta-table-wrap {
+  align-self: stretch;
+  width: 100%;
+  margin: 0;
 }
 #tab-rendered > .rendered-placeholder.welcome-neon {
   flex: 1 1 auto;
@@ -5941,35 +5975,48 @@
   opacity: 0 !important;
 }
 
-/* Raw / Headers tabs fill panel — no black dead zone */
+/* Tab panes fill remaining space above statusbar — never force height:100% (caused black void under statusbar) */
 .tab-content.active {
   flex: 1 1 auto !important;
   min-height: 0 !important;
-  height: 100% !important;
+  height: auto !important;
+  max-height: 100% !important;
   display: flex !important;
   flex-direction: column !important;
   opacity: 1 !important;
   transform: none !important;
+  overflow: hidden !important;
+}
+#tab-rendered {
+  height: auto !important;
+  max-height: 100% !important;
 }
 #tab-raw .raw-response {
   flex: 1 1 auto !important;
   min-height: 0 !important;
   overflow: auto !important;
-  height: 100% !important;
 }
 #tab-headers .meta-table-wrap {
   flex: 1 1 auto !important;
   min-height: 0 !important;
   overflow: auto !important;
-  height: 100% !important;
 }
-#tab-rendered:not(:has(.rendered-placeholder:not(.hidden))) #rendered-frame:not(.hidden),
 #tab-rendered #rendered-frame:not(.hidden) {
   flex: 1 1 auto !important;
   min-height: 0 !important;
   width: 100% !important;
-  height: 100% !important;
+  height: auto !important;
   display: block !important;
+  background: #fff !important;
+}
+.response-panel > .tab-content.active {
+  /* share column with statusbar */
+  flex: 1 1 0 !important;
+}
+.response-statusbar {
+  flex-shrink: 0 !important;
+  position: relative;
+  z-index: 2;
 }
 
 
@@ -6362,20 +6409,29 @@
   overflow: visible;
   flex-wrap: wrap;
 }
-/* Unpinned History = full-height left drawer (reset any leftover pin geometry) */
-#historyPanel.drawer-left.open:not(.pinned) {
-  top: 0 !important;
-  left: 0 !important;
-  right: auto !important;
+/* Unpinned History = full-height left drawer below top-bar */
+#historyPanel.drawer-left.open:not(.pinned),
+#toolsPanel.drawer-right.open:not(.pinned) {
+  top: var(--topbar-h, 56px) !important;
   bottom: 0 !important;
   height: auto !important;
   max-height: none !important;
-  width: min(400px, 94vw) !important;
-  transform: translateX(0) !important;
+  transform: none !important;
   display: flex !important;
   flex-direction: column !important;
 }
-#historyPanel.drawer-left.open:not(.pinned) .vpanel-body {
+#historyPanel.drawer-left.open:not(.pinned) {
+  left: 0 !important;
+  right: auto !important;
+  width: min(400px, 94vw) !important;
+}
+#toolsPanel.drawer-right.open:not(.pinned) {
+  right: 0 !important;
+  left: auto !important;
+  width: min(400px, 94vw) !important;
+}
+#historyPanel.drawer-left.open:not(.pinned) .vpanel-body,
+#toolsPanel.drawer-right.open:not(.pinned) .vpanel-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
@@ -6395,14 +6451,22 @@ body.solo-settings .vpanel:not(#settingsPanel) {
   display: none !important;
 }
 
-body.solo-payload .top-bar,
+/* Keep top-bar in solo Payload so URL / method / Send work */
 body.solo-payload .main-layout,
 body.solo-payload .backend-offline-float {
   display: none !important;
 }
+body.solo-payload .top-bar {
+  display: flex !important;
+  flex-shrink: 0;
+  z-index: 500;
+}
+body.solo-payload .top-bar-tools {
+  /* optional nav still useful */
+}
 
 /* Hide unrelated panels; keep payload + companions (library / converter / settings) */
-body.solo-payload .vpanel:not(#payloadWorkbench):not(#payloadLibPanel):not(#converterPanel):not(#settingsPanel) {
+body.solo-payload .vpanel:not(#payloadWorkbench):not(#payloadLibPanel):not(#converterPanel):not(#settingsPanel):not(#attackConfigPanel):not(#attackNameDialog) {
   display: none !important;
 }
 
@@ -6433,6 +6497,17 @@ body.solo-payload #payloadWorkbench {
   z-index: 400;
   display: flex !important;
   flex-direction: column;
+}
+/* Payload solo keeps top-bar — fill remaining viewport under it */
+body.solo-payload #payloadWorkbench {
+  inset: unset !important;
+  top: calc(var(--topbar-h, 56px) + 8px) !important;
+  left: 10px !important;
+  right: 10px !important;
+  bottom: 10px !important;
+  width: auto !important;
+  height: auto !important;
+  max-height: none !important;
 }
 
 body.solo-settings #settingsPanel .resize-grip,
@@ -6592,7 +6667,7 @@ body.solo-history .main-layout,
 body.solo-history .backend-offline-float {
   display: none !important;
 }
-body.solo-history .vpanel:not(#historyPanel):not(#advFilterPanel):not(#settingsPanel) {
+body.solo-history .vpanel:not(#historyPanel):not(#advFilterPanel):not(#settingsPanel):not(#histResponsePanel):not(#attackNameDialog) {
   display: none !important;
 }
 body.solo-history {
@@ -6659,4 +6734,515 @@ body.solo-history #historyPanel.drawer-left.open:not(.pinned) {
   z-index: 400 !important;
   display: flex !important;
   flex-direction: column !important;
+}
+
+/* ===== History request snapshot (expanded detail) ===== */
+.hist-req-snapshot {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border, #2a2a34);
+  border-radius: 8px;
+  font-size: 11px;
+}
+.hist-req-row {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+.hist-req-k {
+  color: var(--text-muted, #6b6b78);
+  font-weight: 600;
+  padding-top: 2px;
+}
+.hist-req-v {
+  color: var(--text-secondary, #c8c8d0);
+  word-break: break-all;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.hist-req-payload {
+  color: var(--accent-cyan, #00d4ff);
+}
+.hist-req-body {
+  margin: 0;
+  max-height: 120px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary, #c8c8d0);
+  line-height: 1.35;
+}
+.hist-apply-wb {
+  border-color: rgba(108, 92, 231, 0.45) !important;
+  color: var(--accent-bright, #8b7cf0) !important;
+}
+
+/* Floating cookie import (History badge — works in solo tab too) */
+.hist-cookie-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 8000;
+  background: rgba(0, 0, 0, 0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.hist-cookie-overlay.open {
+  display: flex;
+}
+.hist-cookie-card {
+  width: min(440px, 100%);
+  max-height: min(80vh, 560px);
+  overflow: auto;
+  background: var(--bg-elevated, #24242e);
+  border: 1px solid rgba(255, 217, 61, 0.35);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  padding: 12px 14px;
+}
+.hist-cookie-hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: var(--text-muted, #6b6b78);
+  line-height: 1.4;
+}
+.hist-cookie-card .cookie-import-list {
+  max-height: 280px;
+  overflow: auto;
+  margin-bottom: 10px;
+}
+
+/* Purple Attack button (next to Save on payload textarea) */
+.payload-attack-btn {
+  position: absolute;
+  right: 64px;
+  bottom: 8px;
+  z-index: 3;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(139, 124, 240, 0.55);
+  background: rgba(108, 92, 231, 0.18);
+  color: #b8a9ff;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 0 12px rgba(108, 92, 231, 0.15);
+}
+.payload-attack-btn:hover {
+  border-color: rgba(139, 124, 240, 0.85);
+  background: rgba(108, 92, 231, 0.28);
+  color: #ddd6ff;
+  box-shadow: 0 0 16px rgba(108, 92, 231, 0.3);
+}
+.payload-attack-btn.hidden { display: none !important; }
+
+.payload-send-btn {
+  min-width: 110px;
+}
+.payload-send-btn.attack-mode,
+#sendBtn.attack-mode {
+  border-color: rgba(255, 71, 87, 0.55);
+  box-shadow: 0 0 14px rgba(255, 71, 87, 0.2);
+}
+
+/* Attack config as independent virtual panel (centered float) */
+#attackConfigPanel.attack-config-vpanel,
+#attackConfigPanel.vpanel.float-center {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: min(520px, 94vw) !important;
+  max-height: min(82vh, 640px) !important;
+  height: auto !important;
+  z-index: 520;
+  transform: translate(-50%, -50%) scale(0.96);
+  opacity: 0;
+  pointer-events: none;
+  border-radius: 12px;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden;
+  border-left: none;
+  margin: 0;
+}
+#attackConfigPanel.attack-config-vpanel.open,
+#attackConfigPanel.vpanel.float-center.open {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: translate(-50%, -50%) scale(1) !important;
+}
+#attackConfigPanel .vpanel-body.attack-config-panel,
+#attackConfigPanel .attack-config-panel {
+  margin: 0 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  background: var(--bg-secondary) !important;
+  padding: 12px 14px 14px !important;
+  overflow: auto !important;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+#attackConfigPanel .attack-config-header {
+  cursor: default;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+#attackConfigPanel .attack-config-grid {
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+}
+#attackConfigPanel .attack-preview {
+  margin-top: 10px;
+  max-height: 120px;
+  overflow: auto;
+}
+#attackConfigPanel .atk-stop-overlay {
+  z-index: 5;
+}
+
+/* History Response virtual panel */
+#histResponsePanel {
+  width: min(900px, 96vw);
+  height: min(80vh, 720px);
+  max-height: 90vh;
+  z-index: 560;
+}
+#histResponsePanel .hist-response-tabs {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 0 8px;
+}
+#histResponsePanel .hist-tab-content {
+  background: var(--bg-primary);
+}
+
+/* Attack name dialog must paint above payload / attack-config */
+#attackNameDialog.dialog-modal {
+  z-index: 9500 !important;
+}
+#attackNameDialog.dialog-modal.open {
+  z-index: 9500 !important;
+}
+
+/* Solo History: allow response + cookie overlay + dialogs */
+body.solo-history .vpanel:not(#historyPanel):not(#advFilterPanel):not(#settingsPanel):not(#histResponsePanel):not(#attackNameDialog) {
+  display: none !important;
+}
+body.solo-history #histResponsePanel.open {
+  display: flex !important;
+  z-index: 700 !important;
+}
+  display: inline-flex !important;
+}
+
+/* Solo Payload: allow attack config panel */
+body.solo-payload .vpanel:not(#payloadWorkbench):not(#payloadLibPanel):not(#converterPanel):not(#settingsPanel):not(#attackConfigPanel):not(#attackNameDialog) {
+  /* keep previous solo-payload rules if any — this is additive override below */
+}
+body.solo-payload #attackConfigPanel.open {
+  display: flex !important;
+  z-index: 650 !important;
+}
+
+/* Per-record Response button (solo History only) */
+.hist-view-response {
+  border-color: rgba(0, 212, 255, 0.45) !important;
+  color: var(--accent-cyan, #00d4ff) !important;
+}
+.hist-view-response:hover {
+  background: rgba(0, 212, 255, 0.12) !important;
+}
+
+/* History Response viewer — mirrors main response inspector */
+#histResponsePanel.hist-response-vpanel,
+#histResponsePanel {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: min(920px, 96vw) !important;
+  height: min(82vh, 720px) !important;
+  max-height: 90vh !important;
+  transform: translate(-50%, -50%) scale(0.96);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 700;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden;
+  border-radius: 12px;
+}
+#histResponsePanel.open {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: translate(-50%, -50%) scale(1) !important;
+}
+.hist-response-body {
+  padding: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+.hist-response-tabs {
+  flex-shrink: 0;
+  display: flex;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 10px 0;
+  gap: 2px;
+  align-items: flex-end;
+}
+.hist-tab-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: none;
+  flex-direction: column;
+  background: var(--bg-primary);
+}
+.hist-tab-pane.active {
+  display: flex !important;
+}
+.hist-rendered-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: #fff;
+  min-height: 0;
+  display: block;
+}
+.hist-rendered-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 24px;
+  text-align: center;
+}
+.hist-raw-response {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: auto !important;
+  margin: 0 !important;
+  height: auto !important;
+}
+#histMetaTableWrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 14px;
+}
+.hist-response-statusbar {
+  flex-shrink: 0 !important;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+body.solo-history #histResponsePanel.open {
+  display: flex !important;
+  z-index: 750 !important;
+}
+
+/* Cookie Import / Export virtual panels */
+.cookie-io-panel.vpanel.float-center {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: min(560px, 94vw) !important;
+  max-height: min(82vh, 680px) !important;
+  height: auto !important;
+  transform: translate(-50%, -50%) scale(0.96);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 560;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden;
+  border-radius: 12px;
+}
+.cookie-io-panel.vpanel.float-center.open {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: translate(-50%, -50%) scale(1) !important;
+}
+.cookie-io-body {
+  padding: 12px 14px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden !important;
+  overflow-y: auto !important; /* whole body scrolls so Format options aren't clipped */
+}
+.cookie-io-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  flex-shrink: 0;
+}
+#cookieExportPanel .cookie-io-section:last-of-type {
+  flex-shrink: 1;
+  min-height: 0;
+}
+#cookieExportPanel .cookie-export-formats {
+  overflow-y: auto;
+  max-height: min(240px, 36vh);
+  padding-right: 4px;
+}
+.cookie-io-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.cookie-io-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+}
+.cookie-io-textarea {
+  width: 100%;
+  min-height: 120px;
+  max-height: 200px;
+  resize: vertical;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  outline: none;
+}
+.cookie-io-textarea:focus {
+  border-color: rgba(0, 229, 255, 0.45);
+}
+.cookie-io-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.cookie-io-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.cookie-io-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.cookie-io-preview-list {
+  flex: 1 1 auto !important;
+  min-height: 80px;
+  max-height: 280px;
+  overflow-y: auto !important;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  padding: 8px !important;
+}
+.cookie-io-footer {
+  flex-shrink: 0;
+}
+.cookie-export-formats {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cookie-fmt-opt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.cookie-fmt-opt:hover {
+  border-color: rgba(0, 229, 255, 0.3);
+}
+.cookie-fmt-opt code {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+.cookie-fmt-opt input {
+  accent-color: var(--accent-cyan, #00d4ff);
+}
+.cookie-io-file-btn {
+  cursor: pointer;
+  margin: 0;
+}
+
+/* Keep cookie manager body scrolling when list is long */
+#settingsPanel.cookie-mgr-open {
+  display: flex !important;
+  flex-direction: column !important;
+}
+
+
+/* Per-panel minimize (shelf) button — inverse of ↗ */
+.pin-btn.shelf-btn {
+  min-width: 28px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-muted);
+  border-color: var(--border);
+  flex-shrink: 0;
+}
+.vpanel.pinned .pin-btn.shelf-btn:not([hidden]) {
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+.pin-btn.shelf-btn:hover {
+  color: var(--accent-cyan);
+  border-color: rgba(0, 229, 255, 0.4);
+}
+.pin-btn.shelf-btn.is-shelved {
+  color: var(--accent-cyan);
+  border-color: rgba(0, 229, 255, 0.45);
+  background: rgba(0, 229, 255, 0.1);
+}
+.pin-btn.shelf-btn[hidden] {
+  display: none !important;
+}
+/* Don't let header overflow hide the minimize control */
+.vpanel.pinned .vpanel-header-actions {
+  overflow: visible;
+  max-width: none;
+  flex-wrap: wrap;
 }

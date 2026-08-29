@@ -868,6 +868,425 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
         (state._cookieMgrList || []).forEach((c) => { c.active = false; });
         renderCookieManager();
       });
+      $('#cookieMgrImportBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        openCookieBulkImportPanel();
+      });
+      $('#cookieMgrExportBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        openCookieExportPanel();
+      });
+    })();
+
+    // ===== Smart cookie import / export =====
+    function normalizeCookiePair(name, value) {
+      name = String(name || '').trim();
+      value = String(value == null ? '' : value).trim();
+      if (!name || /[\s;]/.test(name)) return null;
+      return { name, value, active: true, note: '', selected: true };
+    }
+
+    function dedupeCookiePairs(list) {
+      const map = new Map();
+      (list || []).forEach((c) => {
+        if (!c || !c.name) return;
+        map.set(c.name, c); // last wins
+      });
+      return [...map.values()];
+    }
+
+    /**
+     * Smart multi-format cookie parser.
+     * Supports: Cookie header, name=value lines, Set-Cookie lines,
+     * Netscape cookies.txt, JSON (EditThisCookie / array / object map), CSV.
+     */
+    function parseCookieImportText(raw) {
+      const text = String(raw || '').trim();
+      if (!text) return { cookies: [], format: 'empty' };
+
+      // 1) JSON
+      if (text.startsWith('{') || text.startsWith('[')) {
+        try {
+          const data = JSON.parse(text);
+          const out = [];
+          if (Array.isArray(data)) {
+            data.forEach((item) => {
+              if (typeof item === 'string') {
+                const eq = item.indexOf('=');
+                if (eq > 0) {
+                  const p = normalizeCookiePair(item.slice(0, eq), item.slice(eq + 1));
+                  if (p) out.push(p);
+                }
+              } else if (item && typeof item === 'object') {
+                const name = item.name || item.key || item.Name || item.Key;
+                const value = item.value != null ? item.value : (item.Value != null ? item.Value : '');
+                const p = normalizeCookiePair(name, value);
+                if (p) {
+                  if (item.note) p.note = String(item.note);
+                  out.push(p);
+                }
+              }
+            });
+          } else if (data && typeof data === 'object') {
+            // { session: "abc", token: "xyz" } or { cookies: [...] }
+            if (Array.isArray(data.cookies)) {
+              return parseCookieImportText(JSON.stringify(data.cookies));
+            }
+            Object.keys(data).forEach((k) => {
+              const v = data[k];
+              if (v != null && typeof v !== 'object') {
+                const p = normalizeCookiePair(k, v);
+                if (p) out.push(p);
+              }
+            });
+          }
+          if (out.length) return { cookies: dedupeCookiePairs(out), format: 'json' };
+        } catch { /* fall through */ }
+      }
+
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const out = [];
+
+      // 2) Netscape cookies.txt (# Netscape / tab-separated)
+      const netscapeish = lines.filter((l) => l && !l.startsWith('#') && l.includes('\t'));
+      if (netscapeish.length && netscapeish.some((l) => l.split('\t').length >= 7)) {
+        netscapeish.forEach((l) => {
+          const parts = l.split('\t');
+          if (parts.length >= 7) {
+            const p = normalizeCookiePair(parts[5], parts[6]);
+            if (p) out.push(p);
+          }
+        });
+        if (out.length) return { cookies: dedupeCookiePairs(out), format: 'netscape' };
+      }
+
+      // 3) CSV header name,value
+      if (/^name\s*,\s*value/i.test(lines[0] || '')) {
+        lines.slice(1).forEach((l) => {
+          const m = l.match(/^([^,]+),(.*)$/);
+          if (m) {
+            const p = normalizeCookiePair(m[1].replace(/^"|"$/g, ''), m[2].replace(/^"|"$/g, ''));
+            if (p) out.push(p);
+          }
+        });
+        if (out.length) return { cookies: dedupeCookiePairs(out), format: 'csv' };
+      }
+
+      // 4) Set-Cookie: lines (possibly folded)
+      const setCookieLines = lines.filter((l) => /^set-cookie\s*:/i.test(l));
+      if (setCookieLines.length) {
+        setCookieLines.forEach((l) => {
+          const body = l.replace(/^set-cookie\s*:\s*/i, '');
+          const first = body.split(';')[0];
+          const eq = first.indexOf('=');
+          if (eq > 0) {
+            const p = normalizeCookiePair(first.slice(0, eq), first.slice(eq + 1));
+            if (p) out.push(p);
+          }
+        });
+        if (out.length) return { cookies: dedupeCookiePairs(out), format: 'set-cookie' };
+      }
+
+      // 5) Multi-line name=value  OR  single Cookie header with ;
+      const joined = lines.join('\n');
+      // Prefer line-per-cookie when most lines have =
+      const eqLines = lines.filter((l) => l.includes('=') && !l.startsWith('#'));
+      if (eqLines.length >= 2 && eqLines.length >= lines.length * 0.6) {
+        eqLines.forEach((l) => {
+          // strip optional "Cookie:" prefix
+          const cleaned = l.replace(/^cookie\s*:\s*/i, '');
+          // if line itself has multiple pairs, split
+          cleaned.split(';').forEach((part) => {
+            const t = part.trim();
+            const eq = t.indexOf('=');
+            if (eq > 0) {
+              const p = normalizeCookiePair(t.slice(0, eq), t.slice(eq + 1));
+              if (p) out.push(p);
+            }
+          });
+        });
+        if (out.length) return { cookies: dedupeCookiePairs(out), format: 'lines' };
+      }
+
+      // 6) Classic Cookie header (single or multi line, semicolon separated)
+      const headerBody = joined.replace(/^cookie\s*:\s*/i, '');
+      headerBody.split(';').forEach((part) => {
+        const t = part.trim();
+        if (!t || t.includes('\n')) return;
+        const eq = t.indexOf('=');
+        if (eq > 0) {
+          const p = normalizeCookiePair(t.slice(0, eq), t.slice(eq + 1));
+          if (p) out.push(p);
+        }
+      });
+      if (out.length) return { cookies: dedupeCookiePairs(out), format: 'header' };
+
+      return { cookies: [], format: 'unknown' };
+    }
+
+    function renderCookieImportPreview() {
+      const wrap = $('#cookieImportPreviewWrap');
+      const box = $('#cookieImportPreview');
+      const applyBtn = $('#cookieImportApplyBtn');
+      const list = state._cookieImportPreview || [];
+      if (!box) return;
+      if (!list.length) {
+        if (wrap) wrap.hidden = true;
+        if (applyBtn) applyBtn.disabled = true;
+        box.innerHTML = '<div class="adv-hint">No cookies detected.</div>';
+        return;
+      }
+      if (wrap) wrap.hidden = false;
+      box.innerHTML = list.map((c, i) => `
+        <div class="cookie-mgr-item${c.selected ? '' : ' off'}" data-i="${i}">
+          <div class="cookie-mgr-row">
+            <input type="checkbox" class="ck-imp-sel" ${c.selected ? 'checked' : ''} title="Include" />
+            <input type="text" class="ck-name ck-imp-name" value="${escapeHtml(c.name)}" spellcheck="false" />
+            <input type="text" class="ck-value ck-imp-val" value="${escapeHtml(c.value)}" spellcheck="false" />
+          </div>
+        </div>
+      `).join('');
+      box.querySelectorAll('.cookie-mgr-item').forEach((el) => {
+        const i = +el.dataset.i;
+        el.querySelector('.ck-imp-sel')?.addEventListener('change', (e) => {
+          state._cookieImportPreview[i].selected = e.target.checked;
+          el.classList.toggle('off', !e.target.checked);
+          updateCookieImportApplyState();
+        });
+        el.querySelector('.ck-imp-name')?.addEventListener('input', (e) => {
+          state._cookieImportPreview[i].name = e.target.value;
+        });
+        el.querySelector('.ck-imp-val')?.addEventListener('input', (e) => {
+          state._cookieImportPreview[i].value = e.target.value;
+        });
+      });
+      updateCookieImportApplyState();
+    }
+
+    function updateCookieImportApplyState() {
+      const applyBtn = $('#cookieImportApplyBtn');
+      if (!applyBtn) return;
+      const n = (state._cookieImportPreview || []).filter((c) => c.selected && c.name).length;
+      applyBtn.disabled = n === 0;
+      applyBtn.textContent = n ? `Import selected (${n})` : 'Import selected';
+    }
+
+    function openCookieBulkImportPanel() {
+      state._cookieImportPreview = [];
+      const ta = $('#cookieImportText');
+      if (ta) ta.value = '';
+      const hint = $('#cookieImportHint');
+      if (hint) hint.textContent = 'Paste any common cookie export format';
+      const wrap = $('#cookieImportPreviewWrap');
+      if (wrap) wrap.hidden = true;
+      const applyBtn = $('#cookieImportApplyBtn');
+      if (applyBtn) { applyBtn.disabled = true; applyBtn.textContent = 'Import selected'; }
+      if (typeof openVPanel === 'function') openVPanel('cookie-bulk-import');
+      else $('#cookieBulkImportPanel')?.classList.add('open');
+    }
+
+    function runCookieImportParse() {
+      const ta = $('#cookieImportText');
+      const raw = ta ? ta.value : '';
+      const { cookies, format } = parseCookieImportText(raw);
+      state._cookieImportPreview = cookies;
+      const hint = $('#cookieImportHint');
+      if (hint) {
+        hint.textContent = cookies.length
+          ? `Detected ${cookies.length} cookie(s) · format: ${format}`
+          : 'No cookies detected — try another format';
+      }
+      renderCookieImportPreview();
+      if (!cookies.length) showToast('No cookies detected');
+      else showToast(`Detected ${cookies.length} · ${format}`, 'success');
+    }
+
+    function applyCookieImport() {
+      const selected = (state._cookieImportPreview || []).filter((c) => c.selected && String(c.name || '').trim());
+      if (!selected.length) {
+        showToast('Select at least one cookie');
+        return;
+      }
+      if (!state._cookieMgrList) state._cookieMgrList = [];
+      const byName = new Map(state._cookieMgrList.map((c) => [c.name, c]));
+      selected.forEach((c) => {
+        const name = String(c.name).trim();
+        const value = String(c.value || '');
+        if (byName.has(name)) {
+          const existing = byName.get(name);
+          existing.value = value;
+          existing.active = true;
+        } else {
+          const row = { name, value, active: true, note: c.note || '' };
+          state._cookieMgrList.push(row);
+          byName.set(name, row);
+        }
+      });
+      renderCookieManager();
+      if (typeof closeVPanel === 'function') closeVPanel('cookie-bulk-import');
+      else $('#cookieBulkImportPanel')?.classList.remove('open');
+      showToast(`Imported ${selected.length} cookie(s)`, 'success');
+    }
+
+    function openCookieExportPanel() {
+      const list = (state._cookieMgrList || []).filter((c) => c.name);
+      state._cookieExportList = list.map((c) => ({
+        name: c.name,
+        value: c.value || '',
+        active: c.active !== false,
+        selected: c.active !== false,
+      }));
+      renderCookieExportList();
+      if (typeof openVPanel === 'function') openVPanel('cookie-bulk-export');
+      else $('#cookieBulkExportPanel')?.classList.add('open');
+    }
+
+    function renderCookieExportList() {
+      const box = $('#cookieExportList');
+      if (!box) return;
+      const list = state._cookieExportList || [];
+      if (!list.length) {
+        box.innerHTML = '<div class="adv-hint">No cookies in manager. Add some first.</div>';
+        return;
+      }
+      box.innerHTML = list.map((c, i) => `
+        <div class="cookie-mgr-item${c.selected ? '' : ' off'}" data-i="${i}">
+          <div class="cookie-mgr-row">
+            <input type="checkbox" class="ck-exp-sel" ${c.selected ? 'checked' : ''} />
+            <input type="text" class="ck-name" value="${escapeHtml(c.name)}" readonly />
+            <input type="text" class="ck-value" value="${escapeHtml(c.value)}" readonly />
+          </div>
+        </div>
+      `).join('');
+      box.querySelectorAll('.cookie-mgr-item').forEach((el) => {
+        const i = +el.dataset.i;
+        el.querySelector('.ck-exp-sel')?.addEventListener('change', (e) => {
+          state._cookieExportList[i].selected = e.target.checked;
+          el.classList.toggle('off', !e.target.checked);
+        });
+      });
+    }
+
+    function getSelectedExportCookies() {
+      return (state._cookieExportList || []).filter((c) => c.selected && c.name);
+    }
+
+    function formatCookiesExport(cookies, fmt) {
+      const list = cookies || [];
+      if (fmt === 'json') {
+        return JSON.stringify(list.map((c) => ({ name: c.name, value: c.value || '' })), null, 2);
+      }
+      if (fmt === 'lines') {
+        return list.map((c) => `${c.name}=${c.value || ''}`).join('\n');
+      }
+      if (fmt === 'csv') {
+        return ['name,value', ...list.map((c) => {
+          const v = String(c.value || '').replace(/"/g, '""');
+          const needsQ = /[,"\n]/.test(v);
+          return `${c.name},${needsQ ? `"${v}"` : v}`;
+        })].join('\n');
+      }
+      if (fmt === 'netscape') {
+        const lines = ['# Netscape HTTP Cookie File', '# https://curl.se/docs/http-cookies.html'];
+        list.forEach((c) => {
+          // domain \t flag \t path \t secure \t expiry \t name \t value
+          lines.push(['.example.com', 'TRUE', '/', 'FALSE', '0', c.name, c.value || ''].join('\t'));
+        });
+        return lines.join('\n');
+      }
+      // header default
+      return list.map((c) => `${c.name}=${c.value || ''}`).join('; ');
+    }
+
+    function getChosenExportFormat() {
+      const el = document.querySelector('input[name="cookieExportFmt"]:checked');
+      return (el && el.value) || 'header';
+    }
+
+    function exportCookiesDownload() {
+      const selected = getSelectedExportCookies();
+      if (!selected.length) { showToast('Select at least one cookie'); return; }
+      const fmt = getChosenExportFormat();
+      const text = formatCookiesExport(selected, fmt);
+      const ext = ({ header: 'txt', lines: 'txt', json: 'json', netscape: 'txt', csv: 'csv' })[fmt] || 'txt';
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `cookies-export.${ext}`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast(`Exported ${selected.length} cookie(s)`, 'success');
+    }
+
+    async function exportCookiesCopy() {
+      const selected = getSelectedExportCookies();
+      if (!selected.length) { showToast('Select at least one cookie'); return; }
+      const fmt = getChosenExportFormat();
+      const text = formatCookiesExport(selected, fmt);
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast('Copied to clipboard', 'success');
+      } catch {
+        // fallback
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); showToast('Copied', 'success'); }
+        catch { showToast('Copy failed'); }
+        ta.remove();
+      }
+    }
+
+    (function bindCookieImportExport() {
+      $('#cookieImportParseBtn')?.addEventListener('click', runCookieImportParse);
+      $('#cookieImportApplyBtn')?.addEventListener('click', applyCookieImport);
+      $('#cookieImportSelAll')?.addEventListener('click', () => {
+        (state._cookieImportPreview || []).forEach((c) => { c.selected = true; });
+        renderCookieImportPreview();
+      });
+      $('#cookieImportSelNone')?.addEventListener('click', () => {
+        (state._cookieImportPreview || []).forEach((c) => { c.selected = false; });
+        renderCookieImportPreview();
+      });
+      $('#cookieImportFile')?.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const ta = $('#cookieImportText');
+          if (ta) ta.value = String(reader.result || '');
+          runCookieImportParse();
+        };
+        reader.readAsText(file);
+        e.target.value = '';
+      });
+      // Drag-drop onto textarea
+      const ta = $('#cookieImportText');
+      if (ta) {
+        ta.addEventListener('dragover', (e) => { e.preventDefault(); ta.classList.add('drag-over'); });
+        ta.addEventListener('dragleave', () => ta.classList.remove('drag-over'));
+        ta.addEventListener('drop', (e) => {
+          e.preventDefault();
+          ta.classList.remove('drag-over');
+          const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+          if (file) {
+            const reader = new FileReader();
+            reader.onload = () => { ta.value = String(reader.result || ''); runCookieImportParse(); };
+            reader.readAsText(file);
+          }
+        });
+      }
+      $('#cookieExportSelAll')?.addEventListener('click', () => {
+        (state._cookieExportList || []).forEach((c) => { c.selected = true; });
+        renderCookieExportList();
+      });
+      $('#cookieExportSelNone')?.addEventListener('click', () => {
+        (state._cookieExportList || []).forEach((c) => { c.selected = false; });
+        renderCookieExportList();
+      });
+      $('#cookieExportDownloadBtn')?.addEventListener('click', exportCookiesDownload);
+      $('#cookieExportCopyBtn')?.addEventListener('click', exportCookiesCopy);
     })();
 
     function renderHeaders() {
@@ -1757,6 +2176,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       }
       renderHistory();
       renderHfChips();
+      if (typeof scheduleHistorySave === 'function') scheduleHistorySave();
       // Refresh picker if still open
       const ov = $('#atkPickerOverlay');
       if (ov && ov.classList.contains('open')) {
@@ -1788,6 +2208,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       }
       renderHistory();
       renderHfChips();
+      if (typeof scheduleHistorySave === 'function') scheduleHistorySave();
       const left = getKnownAttacks();
       if (!left.length) closeAttackPicker();
       else openAttackPicker();
@@ -2518,7 +2939,11 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
 
         const pathLabel = getUrlPath(item.url);
         const displayName = item.name || pathLabel;
-        const snippet = (item.payload || item.url).slice(0, 55);
+        // Prefer payload token, then a short body hint, then URL
+        let snippet = '';
+        if (item.payload) snippet = String(item.payload).slice(0, 55);
+        else if (item.postBody) snippet = String(item.postBody).replace(/\s+/g, ' ').slice(0, 55);
+        else snippet = String(item.url || '').slice(0, 55);
         const statusLabel = item.response.status === 0 ? 'ERR' : item.response.status;
         const bodySize = (item.response.body || '').length;
         const sizeLabel = formatBytes(bodySize);
@@ -2542,7 +2967,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           : '';
         const setCookies = getSetCookiesFromHeaders(item.response && item.response.headers);
         const cookieBadge = setCookies.length
-          ? `<span class="cookie-badge" title="Set-Cookie (${setCookies.length}): ${escapeHtml(setCookies.map(c => c.name).join(', '))}&#10;Click → Headers & import"></span>`
+          ? `<span class="cookie-badge" title="Set-Cookie (${setCookies.length}): ${escapeHtml(setCookies.map(c => c.name).join(', '))}&#10;Click → import into request Cookie header"></span>`
           : '';
 
         el.innerHTML = `
@@ -2571,10 +2996,20 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
             </div>
           </div>
           <div class="history-detail">
+            <div class="hist-req-snapshot">
+              <div class="hist-req-row"><span class="hist-req-k">Method</span><code class="hist-req-v">${escapeHtml(item.method)}</code></div>
+              <div class="hist-req-row"><span class="hist-req-k">URL</span><code class="hist-req-v" title="${escapeHtml(item.url)}">${escapeHtml(item.url)}</code></div>
+              ${item.payload ? `<div class="hist-req-row"><span class="hist-req-k">Payload</span><code class="hist-req-v hist-req-payload">${escapeHtml(String(item.payload))}</code></div>` : ''}
+              ${item.postBody ? `<div class="hist-req-row hist-req-body-row"><span class="hist-req-k">Body</span><pre class="hist-req-body" title="${escapeHtml(String(item.postBody))}">${escapeHtml(String(item.postBody).slice(0, 800))}${String(item.postBody).length > 800 ? '\n…' : ''}</pre></div>` : ''}
+            </div>
             <textarea class="hist-note" data-id="${item.id}" placeholder="Note for this request…" spellcheck="false">${noteVal}</textarea>
             <div class="history-detail-actions">
-              <button class="btn btn-sm hist-dl-url" data-id="${item.id}" title="Copy full URL">Copy URL</button>
-              <button class="btn btn-sm hist-dl-file" data-id="${item.id}" title="Download request info as .txt">Download</button>
+              <button type="button" class="btn btn-sm hist-apply-wb" data-id="${item.id}" title="Copy this request into URL / Body editors (overwrites workbench)">Load into editor</button>
+              <button type="button" class="btn btn-sm hist-dl-url" data-id="${item.id}" title="Copy full URL">Copy URL</button>
+              <button type="button" class="btn btn-sm hist-dl-file" data-id="${item.id}" title="Download request info as .txt">Download</button>
+              ${document.body.classList.contains('solo-history')
+                ? `<button type="button" class="btn btn-sm hist-view-response" data-id="${item.id}" title="Open Rendered / Raw / Headers viewer">Response</button>`
+                : ''}
               <span class="note-hint">auto-saved</span>
             </div>
           </div>`;
@@ -2677,6 +3112,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           if (item) {
             item.pinned = !item.pinned;
             renderHistory();
+            if (typeof scheduleHistorySave === 'function') scheduleHistorySave();
             showToast(item.pinned ? 'Pinned' : 'Unpinned');
           }
         });
@@ -2695,21 +3131,26 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
         });
       });
 
-      // Neon cookie badge → close history, Headers tab + open import panel
+      // Cookie badge → import Set-Cookie into request headers (works in main + solo History tab)
       historyList.querySelectorAll('.cookie-badge').forEach((badge) => {
         badge.addEventListener('click', (e) => {
           e.stopPropagation();
           const itemEl = badge.closest('.history-item');
           const id = itemEl ? +itemEl.dataset.id : null;
-          if (id != null && typeof loadHistoryItem === 'function') loadHistoryItem(id);
-          $$('.tab-btn').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'headers'));
-          $$('.tab-content').forEach((c) => c.classList.toggle('active', c.id === 'tab-headers'));
-          // Collapse history drawer so response Headers is visible
-          if (typeof closeVPanel === 'function') closeVPanel('history');
-          requestAnimationFrame(() => {
-            openCookieImportPanel();
-            showToast('Select cookies to import');
-          });
+          const item = id != null ? state.history.find((h) => h.id === id) : null;
+          if (!item) return;
+          // Select row + show response without touching workbench
+          if (typeof loadHistoryItem === 'function') loadHistoryItem(id);
+          openHistoryCookieImport(item);
+        });
+      });
+
+      // Explicit "Load into editor" — only path that overwrites URL/Body
+      historyList.querySelectorAll('.hist-apply-wb').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = +btn.dataset.id;
+          if (typeof loadHistoryItem === 'function') loadHistoryItem(id, { applyWorkbench: true });
         });
       });
 
@@ -2806,6 +3247,15 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
           showToast('Downloaded', 'success');
         });
       });
+
+      // Solo History only — open response viewer for this record
+      historyList.querySelectorAll('.hist-view-response').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = +btn.dataset.id;
+          if (typeof openHistResponseForItem === 'function') openHistResponseForItem(id);
+        });
+      });
     }
 
     function reorderHistory(fromId, toId) {
@@ -2815,6 +3265,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
       const [moved] = state.history.splice(fromIdx, 1);
       state.history.splice(toIdx, 0, moved);
       renderHistory();
+      if (typeof scheduleHistorySave === 'function') scheduleHistorySave();
     }
 
     function deleteHistoryItem(id) {
@@ -2824,24 +3275,169 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
         clearResponseView();
       }
       renderHistory();
+      if (typeof scheduleHistorySave === 'function') scheduleHistorySave();
       showToast('Deleted');
     }
 
-    function loadHistoryItem(id) {
+    /**
+     * Select a history row and show its response.
+     * Default: does NOT overwrite Payload / URL / Body workbench (attack templates stay).
+     * Pass { applyWorkbench: true } to intentionally load that request into the editors.
+     */
+    function loadHistoryItem(id, opts) {
+      opts = opts || {};
       const item = state.history.find(h => h.id === id);
       if (!item) return;
       state.activeHistoryId = id;
       state.openDetailId = id;
-      methodSelect.value = item.method;
-      urlInput.value = item.url;
-      // Don't wipe workbench batch template — only show this payload if not a batch source
-      // User can use Restore Attack Source for full template
-      if (postBodyInput) postBodyInput.value = item.postBody || '';
-      updateBodyVisibility();
-      // Expand response panel if it was minimized
+
+      if (opts.applyWorkbench) {
+        methodSelect.value = item.method;
+        urlInput.value = item.url;
+        if (postBodyInput) postBodyInput.value = item.postBody || '';
+        // Only fill payload lines for non-batch shots — never replace {1..N} / $1 template
+        if (payloadInput && !item.batchId && item.payload != null && item.payload !== '') {
+          payloadInput.value = item.payload;
+          if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
+        }
+        if (typeof updateBodyVisibility === 'function') updateBodyVisibility();
+        showToast('Loaded into editor', 'success');
+      }
+
       if (typeof setResponseCollapsed === 'function') setResponseCollapsed(false);
-      displayResponse(item.response, item.url);
+      // Main tab: use full response inspector. Solo History: only update if viewer already open.
+      if (!document.body.classList.contains('solo-history')) {
+        if (typeof displayResponse === 'function') displayResponse(item.response, item.url);
+      } else if ($('#histResponsePanel')?.classList.contains('open') && typeof displayHistResponse === 'function') {
+        displayHistResponse(item);
+      }
       renderHistory();
+    }
+
+    /**
+     * Solo-History response viewer — mirrors main displayResponse (highlight, headers legend, rendered pipeline).
+     */
+    function displayHistResponse(item) {
+      if (!item || !item.response) return;
+      const resp = item.response;
+      const targetUrl = item.url || '';
+      const bodyLen = (resp.body || '').length;
+      const ct = (resp.headers && (resp.headers['Content-Type'] || resp.headers['content-type'])) || '';
+
+      const sbStatus = $('#histSbStatus');
+      if (sbStatus) {
+        sbStatus.textContent = `${resp.status} ${resp.statusText || ''}`;
+        sbStatus.className = resp.status >= 500 ? 'status-err'
+          : resp.status >= 400 ? 'status-warn'
+          : resp.status > 0 ? 'status-ok' : 'status-err';
+      }
+      if ($('#histSbTime')) $('#histSbTime').textContent = `${resp.timeMs || 0} ms`;
+      if ($('#histSbSize')) $('#histSbSize').textContent = `${bodyLen} B`;
+      if ($('#histSbType')) $('#histSbType').textContent = ct || '—';
+
+      const title = $('#histResponseTitle');
+      if (title) {
+        const short = (item.name || getUrlPath(item.url) || 'Response').slice(0, 48);
+        title.textContent = short;
+      }
+
+      // Raw — same highlighter as main inspector
+      const raw = $('#histRawResponse');
+      if (raw) {
+        raw.innerHTML = typeof highlightCode === 'function'
+          ? highlightCode(resp.body || '', ct)
+          : escapeHtml(resp.body || 'No response data.');
+      }
+
+      // Headers — same legend + categorized table as main
+      const metaWrap = $('#histMetaTableWrap') || $('#histMetaTable');
+      if (metaWrap) {
+        const legend = `<div class="meta-legend">
+          <span><i style="background:#ff6b6b"></i> Security</span>
+          <span><i style="background:#ffd93d"></i> Auth / Cookie</span>
+          <span><i style="background:#6bcB77"></i> Cache</span>
+          <span><i style="background:#4dabf7"></i> Content</span>
+          <span><i style="background:#b197fc"></i> Server</span>
+          <span><i style="background:#ff922b"></i> CORS</span>
+        </div>`;
+        let tableHtml = legend + `<table class="meta-table">
+          <tr><th>Status Code</th><td><span class="meta-val-num">${resp.status}</span> ${escapeHtml(resp.statusText || '')}</td></tr>
+          <tr><th>Response Time</th><td><span class="meta-val-num">${resp.timeMs || 0}</span> ms</td></tr>
+          <tr><th>Body Size</th><td><span class="meta-val-num">${bodyLen}</span> bytes</td></tr>
+          <tr><th>URL</th><td><span class="meta-val-url">${escapeHtml(targetUrl)}</span></td></tr>`;
+        if (resp.finalUrl && resp.finalUrl !== targetUrl) {
+          tableHtml += `<tr class="meta-cat-content"><th><span class="meta-key">Final URL</span><span class="meta-badge content">Redirect</span></th><td><span class="meta-val-url">${escapeHtml(resp.finalUrl)}</span></td></tr>`;
+        }
+        if (resp.headers && typeof highlightHeadersTable === 'function') {
+          tableHtml += highlightHeadersTable(resp.headers);
+        }
+        tableHtml += '</table>';
+        metaWrap.innerHTML = tableHtml;
+      }
+
+      // Rendered — same pipeline as main (base href, night protect, interaction bridge)
+      let htmlToRender = resp.fixedHtml || resp.body || '';
+      if (!resp.fixedHtml && htmlToRender) {
+        let baseHref = targetUrl || 'https://example.com/';
+        try {
+          const u = new URL(targetUrl);
+          baseHref = u.origin + u.pathname.replace(/\/[^/]*$/, '/');
+        } catch { /* ignore */ }
+        htmlToRender = /<head[^>]*>/i.test(htmlToRender)
+          ? htmlToRender.replace(/<head[^>]*>/i, (m) => `${m}\n<base href="${baseHref}">`)
+          : `<base href="${baseHref}">\n${htmlToRender}`;
+      }
+      if (typeof prepareHtmlForRender === 'function') {
+        htmlToRender = prepareHtmlForRender(htmlToRender);
+      }
+      if (state.nightProtectMode > 0 && typeof applyNightProtect === 'function') {
+        htmlToRender = applyNightProtect(htmlToRender, state.nightProtectMode);
+      }
+      if (typeof injectInteractionBridge === 'function') {
+        htmlToRender = injectInteractionBridge(htmlToRender, targetUrl);
+      }
+
+      const frame = $('#histRenderedFrame');
+      const empty = $('#histRenderedEmpty');
+      if (frame) {
+        const hasBody = !!(resp.body || resp.fixedHtml);
+        if (empty) empty.style.display = hasBody ? 'none' : '';
+        frame.style.display = hasBody ? 'block' : 'none';
+        frame.removeAttribute('srcdoc');
+        requestAnimationFrame(() => {
+          frame.srcdoc = htmlToRender || '<pre style="color:#ccc;padding:16px;font:12px monospace;">Empty response body</pre>';
+        });
+      }
+    }
+
+    function openHistResponseForItem(id) {
+      const item = state.history.find((h) => h.id === id);
+      if (!item) {
+        showToast('Item not found');
+        return;
+      }
+      state.activeHistoryId = id;
+      state.openDetailId = id;
+      if (typeof displayHistResponse === 'function') displayHistResponse(item);
+      if (typeof openVPanel === 'function') openVPanel('hist-response');
+      renderHistory();
+    }
+
+    function bindHistResponseUI() {
+      const panel = $('#histResponsePanel');
+      if (!panel) return;
+      panel.querySelectorAll('[data-hist-tab]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const tab = btn.dataset.histTab;
+          panel.querySelectorAll('[data-hist-tab]').forEach((b) => b.classList.toggle('active', b === btn));
+          panel.querySelectorAll('[data-hist-pane]').forEach((pane) => {
+            const on = pane.dataset.histPane === tab;
+            pane.hidden = !on;
+            pane.classList.toggle('active', on);
+            pane.style.display = on ? 'flex' : 'none';
+          });
+        });
+      });
     }
 
     clearHistoryBtn.addEventListener('click', () => {
@@ -2854,6 +3450,7 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
         clearResponseView();
       }
       renderHistory();
+      if (typeof scheduleHistorySave === 'function') scheduleHistorySave();
       showToast(removed ? `Cleared ${removed} unpinned item(s)` : 'Nothing to clear (all pinned)');
     });
 
@@ -3690,6 +4287,81 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
     }
     function closeCookieImportPanel() {
       $('#cookieImportPanel')?.classList.remove('open');
+    }
+
+    /**
+     * Cookie import from History badge — works in main UI and solo History tab.
+     * Does not rely on the response Headers tab (hidden in solo).
+     * Applying still writes request Cookie headers (synced via localStorage).
+     */
+    function openHistoryCookieImport(item) {
+      const cookies = getSetCookiesFromHeaders(item && item.response && item.response.headers);
+      if (!cookies.length) {
+        showToast('No Set-Cookie in this response');
+        return;
+      }
+      let ov = $('#histCookieOverlay');
+      if (!ov) {
+        ov = document.createElement('div');
+        ov.id = 'histCookieOverlay';
+        ov.className = 'hist-cookie-overlay';
+        document.body.appendChild(ov);
+      }
+      const items = cookies.map((c, i) => `
+        <label class="cookie-import-item selected" data-idx="${i}">
+          <input type="checkbox" checked data-pair="${escapeHtml(c.pair)}" />
+          <span>
+            <span class="ci-pair">${escapeHtml(c.pair)}</span>
+            ${c.attrs.length ? `<span class="ci-attrs">${escapeHtml(c.attrs.join(' · '))}</span>` : ''}
+          </span>
+        </label>
+      `).join('');
+      ov.innerHTML = `
+        <div class="hist-cookie-card" role="dialog" aria-label="Import Set-Cookie">
+          <div class="cookie-import-title">
+            <span style="width:8px;height:8px;border-radius:50%;background:#ffd93d;box-shadow:0 0 8px #ffd93d;display:inline-block;"></span>
+            <span>Set-Cookie — add to request headers</span>
+            <button type="button" class="ci-close" id="histCookieClose" title="Close">×</button>
+          </div>
+          <p class="hist-cookie-hint">Applies to Cookie header used on the next Send (synced across tabs).</p>
+          <div class="cookie-import-list" id="histCookieList">${items}</div>
+          <div class="cookie-import-actions">
+            <button type="button" class="btn btn-sm btn-ghost" id="histCookieAll">All</button>
+            <button type="button" class="btn btn-sm btn-ghost" id="histCookieNone">None</button>
+            <button type="button" class="btn btn-sm btn-primary" id="histCookieApply">Add selected → Headers</button>
+          </div>
+        </div>`;
+      ov.classList.add('open');
+
+      const list = ov.querySelector('#histCookieList');
+      list?.querySelectorAll('.cookie-import-item').forEach((el) => {
+        const cb = el.querySelector('input');
+        cb?.addEventListener('change', () => el.classList.toggle('selected', !!cb.checked));
+      });
+      ov.querySelector('#histCookieClose')?.addEventListener('click', () => ov.classList.remove('open'));
+      ov.addEventListener('click', (e) => { if (e.target === ov) ov.classList.remove('open'); });
+      ov.querySelector('#histCookieAll')?.addEventListener('click', () => {
+        list?.querySelectorAll('input[type=checkbox]').forEach((cb) => {
+          cb.checked = true;
+          cb.closest('.cookie-import-item')?.classList.add('selected');
+        });
+      });
+      ov.querySelector('#histCookieNone')?.addEventListener('click', () => {
+        list?.querySelectorAll('input[type=checkbox]').forEach((cb) => {
+          cb.checked = false;
+          cb.closest('.cookie-import-item')?.classList.remove('selected');
+        });
+      });
+      ov.querySelector('#histCookieApply')?.addEventListener('click', () => {
+        const pairs = [...(list?.querySelectorAll('input[type=checkbox]:checked') || [])]
+          .map((cb) => cb.dataset.pair)
+          .filter(Boolean);
+        if (typeof applySetCookiesToRequestHeaders === 'function') {
+          applySetCookiesToRequestHeaders(pairs);
+        }
+        ov.classList.remove('open');
+        showToast(pairs.length ? `Added ${pairs.length} cookie(s) to headers` : 'Nothing selected', pairs.length ? 'success' : '');
+      });
     }
 
     function bindCookieImportPanel() {
@@ -4590,6 +5262,10 @@ img, video, canvas { opacity: 0.9; }
       'attack-dialog': '#attackNameDialog',
       'payload-lib': '#payloadLibPanel',
       converter: '#converterPanel',
+      'attack-config': '#attackConfigPanel',
+      'hist-response': '#histResponsePanel',
+      'cookie-bulk-import': '#cookieBulkImportPanel',
+      'cookie-bulk-export': '#cookieBulkExportPanel',
     };
     const PINNABLE = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib', 'converter']);
     const PIN_BTN_SEL = {
@@ -4602,6 +5278,43 @@ img, video, canvas { opacity: 0.9; }
       'payload-lib': '#payloadLibPinBtn',
       converter: '#converterPinBtn',
     };
+    // Per-panel minimize (shelf) — inverse of ↗; only while pinned
+    const SHELF_BTN_SEL = {
+      payload: '#payloadShelfBtn',
+      history: '#historyShelfBtn',
+      cheatsheet: '#cheatShelfBtn',
+      proxy: '#proxyShelfBtn',
+      settings: '#settingsShelfBtn',
+      tools: '#toolsShelfBtn',
+      'payload-lib': '#payloadLibShelfBtn',
+      converter: '#converterShelfBtn',
+    };
+
+    function updateShelfBtn(name) {
+      const sel = SHELF_BTN_SEL[name];
+      const btn = sel ? $(sel) : null;
+      const el = $(VPANEL_MAP[name]);
+      if (!btn || !el) return;
+      // Show whenever the panel is pinned (pin implies floating window)
+      const show = el.classList.contains('pinned');
+      if (show) {
+        btn.removeAttribute('hidden');
+        btn.hidden = false;
+        btn.style.display = 'inline-flex';
+        btn.style.visibility = 'visible';
+        btn.style.opacity = '1';
+      } else {
+        btn.setAttribute('hidden', '');
+        btn.hidden = true;
+        btn.style.display = 'none';
+      }
+      const shelved = el.classList.contains('shelved');
+      btn.classList.toggle('is-shelved', shelved);
+      btn.textContent = shelved ? '↑' : '↓';
+      btn.title = shelved
+        ? 'Restore this panel from tray'
+        : 'Minimize this panel to tray (per-panel shelf)';
+    }
     const PIN_DEFAULTS = {
       payload: { top: '80px', right: '24px', width: '420px', height: '420px' },
       history: { top: '72px', left: '16px', width: '360px', height: Math.min(window.innerHeight * 0.7, 620) + 'px' },
@@ -4660,6 +5373,7 @@ img, video, canvas { opacity: 0.9; }
         pinBtn.classList.remove('active');
         pinBtn.textContent = 'Pin';
       }
+      if (typeof updateShelfBtn === 'function') updateShelfBtn(name);
       if (typeof updatePinTray === 'function') updatePinTray();
     }
 
@@ -4670,7 +5384,7 @@ img, video, canvas { opacity: 0.9; }
       if (!panel) return;
 
       // Pin = never auto-close. Work panels stack (don't kill each other).
-      const MODALS = new Set(['settings', 'adv-filter', 'attack-dialog']);
+      const MODALS = new Set(['settings', 'adv-filter', 'attack-dialog', 'attack-config', 'hist-response', 'cookie-bulk-import', 'cookie-bulk-export']);
       const WORK = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'tools', 'payload-lib', 'converter']);
 
       Object.keys(VPANEL_MAP).forEach((k) => {
@@ -4858,6 +5572,8 @@ img, video, canvas { opacity: 0.9; }
         pinBtn.textContent = on ? 'Pinned' : 'Pin';
       }
       if (on) {
+        // Pinned windows stay open (otherwise ↓ never appears)
+        panel.classList.add('open');
         // Always ensure pinned geometry (drawers otherwise stay full-height)
         if (!panel.style.top) panel.style.top = defaults.top || '80px';
         if (!panel.style.left && !panel.style.right) {
@@ -4888,6 +5604,7 @@ img, video, canvas { opacity: 0.9; }
           vpanelBackdrop.classList.add('open');
         }
       }
+      if (typeof updateShelfBtn === 'function') updateShelfBtn(name);
       updatePinTray();
     }
 
@@ -4912,6 +5629,10 @@ img, video, canvas { opacity: 0.9; }
     }
 
     function updatePinTray() {
+      // Keep per-panel ↓/↑ buttons in sync with tray / Alt+I / Alt+K
+      if (typeof updateShelfBtn === 'function' && typeof PINNABLE !== 'undefined') {
+        [...PINNABLE].forEach((n) => updateShelfBtn(n));
+      }
       const tray = $('#pinTray');
       if (!tray) return;
       const names = getPinnedPanelNames();
@@ -4937,6 +5658,7 @@ img, video, canvas { opacity: 0.9; }
       if (!shelved) {
         focusPanel(name);
       }
+      if (typeof updateShelfBtn === 'function') updateShelfBtn(name);
       updatePinTray();
     }
 
@@ -4958,38 +5680,53 @@ img, video, canvas { opacity: 0.9; }
       }
     });
 
-    /** Alt+K — cycle pinned panels one-by-one (like Alt+Tab) */
+    /** Alt+K — cycle pinned panels one-by-one; after the last, hide all (none visible). */
     function cyclePinnedPanels() {
       const names = getPinnedPanelNames();
       if (!names.length) {
         showToast('No pinned panels');
         return;
       }
-      // Prefer order by current z-index (front-most last for stable cycle)
+      // Stable order by z-index (low → high), same as tray stack
       const ranked = names.slice().sort((a, b) => {
         const za = parseInt($(VPANEL_MAP[a])?.style.zIndex || '0', 10) || 0;
         const zb = parseInt($(VPANEL_MAP[b])?.style.zIndex || '0', 10) || 0;
         return za - zb;
       });
-      let cur = ranked.findIndex((n) => {
-        const el = $(VPANEL_MAP[n]);
-        return el && !el.classList.contains('shelved') && el.classList.contains('panel-front');
-      });
-      if (cur < 0) {
-        cur = ranked.findIndex((n) => {
+      const visibleIdx = ranked
+        .map((n, i) => {
           const el = $(VPANEL_MAP[n]);
-          return el && !el.classList.contains('shelved');
+          return el && !el.classList.contains('shelved') ? i : -1;
+        })
+        .filter((i) => i >= 0);
+
+      // Prefer the front-most visible as "current"
+      let cur = -1;
+      if (visibleIdx.length) {
+        const front = ranked.findIndex((n) => {
+          const el = $(VPANEL_MAP[n]);
+          return el && !el.classList.contains('shelved') && el.classList.contains('panel-front');
         });
+        cur = front >= 0 ? front : visibleIdx[visibleIdx.length - 1];
       }
-      const next = ranked[((cur < 0 ? 0 : cur) + 1) % ranked.length];
-      ranked.forEach((n) => {
-        const el = $(VPANEL_MAP[n]);
-        if (!el) return;
-        el.classList.toggle('shelved', n !== next);
-      });
-      focusPanel(next);
+
+      if (visibleIdx.length === 0) {
+        // All hidden → show first
+        ranked.forEach((n, i) => setPanelShelved(n, i !== 0));
+        focusPanel(ranked[0]);
+        showToast(`Focus: ${PIN_TRAY_LABELS[ranked[0]] || ranked[0]}`, 'success');
+      } else if (cur >= ranked.length - 1) {
+        // On last → hide all (extra step after the last tab)
+        ranked.forEach((n) => setPanelShelved(n, true));
+        showToast('All pinned panels hidden', 'success');
+      } else {
+        // Show next only
+        const next = cur + 1;
+        ranked.forEach((n, i) => setPanelShelved(n, i !== next));
+        focusPanel(ranked[next]);
+        showToast(`Focus: ${PIN_TRAY_LABELS[ranked[next]] || ranked[next]}`, 'success');
+      }
       updatePinTray();
-      showToast(`Focus: ${PIN_TRAY_LABELS[next] || next}`, 'success');
     }
 
     function toggleAllPinnedShelf() {
@@ -5088,6 +5825,16 @@ img, video, canvas { opacity: 0.9; }
         if (!panel) return;
         setPanelPinned(name, !panel.classList.contains('pinned'), PIN_DEFAULTS[name]);
       });
+      const shelfSel = SHELF_BTN_SEL[name];
+      const shelfBtn = shelfSel ? $(shelfSel) : null;
+      if (shelfBtn) {
+        shelfBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          // Per-panel shelf — same action as clicking that panel in the pin tray
+          togglePinShelf(name);
+        });
+      }
     });
     setupPinnedDrag('#payloadWorkbench', '#payloadDragHandle');
     setupPinnedDrag('#historyPanel', '#historyDragHandle');
@@ -5406,27 +6153,47 @@ img, video, canvas { opacity: 0.9; }
         nameInput.value = defaultName || '';
         if (noteInput) noteInput.value = '';
         dialog.classList.add('open');
-        if (vpanelBackdrop) vpanelBackdrop.classList.add('open');
+        // Always above Payload / other vpanels (payload z can be 500+)
+        panelZCounter = Math.max(panelZCounter || 460, 500) + 50;
+        dialog.style.zIndex = String(Math.max(panelZCounter, 9000));
+        if (vpanelBackdrop) {
+          vpanelBackdrop.classList.add('open');
+          vpanelBackdrop.style.zIndex = String(Math.max(panelZCounter - 1, 8990));
+        }
         setTimeout(() => { nameInput.focus(); nameInput.select(); }, 50);
 
+        let resolved = false;
+        const onBdClick = (e) => {
+          if (e.target === vpanelBackdrop && dialog.classList.contains('open')) onCancel();
+        };
         const cleanup = () => {
           dialog.classList.remove('open');
+          dialog.style.zIndex = '';
           btnOk.removeEventListener('click', onOk);
           btnCancel.removeEventListener('click', onCancel);
           if (btnX) btnX.removeEventListener('click', onCancel);
           nameInput.removeEventListener('keydown', onKey);
+          if (vpanelBackdrop) vpanelBackdrop.removeEventListener('click', onBdClick);
         };
         const restoreBackdropAfterDialog = () => {
           if (!vpanelBackdrop) return;
-          // Backdrop only if a non-pinned panel is still open
+          vpanelBackdrop.style.zIndex = '';
+          // Solo tabs must never stay under a full-page dark veil
+          if (document.body.classList.contains('solo-panel')) {
+            vpanelBackdrop.classList.remove('open');
+            return;
+          }
           const needBd = Object.keys(VPANEL_MAP || {}).some((k) => {
+            if (k === 'attack-dialog') return false;
             const el = $(VPANEL_MAP[k]);
-            return el && el.classList.contains('open') && !el.classList.contains('pinned')
-              && k !== 'attack-dialog';
+            return !!(el && el.classList.contains('open') && !el.classList.contains('pinned'));
           });
-          vpanelBackdrop.classList.toggle('open', needBd);
+          if (needBd) vpanelBackdrop.classList.add('open');
+          else vpanelBackdrop.classList.remove('open');
         };
         const onOk = () => {
+          if (resolved) return;
+          resolved = true;
           const name = (nameInput.value || '').trim() || defaultName;
           const note = (noteInput && noteInput.value || '').trim();
           cleanup();
@@ -5434,6 +6201,8 @@ img, video, canvas { opacity: 0.9; }
           resolve({ name, note, cancelled: false });
         };
         const onCancel = () => {
+          if (resolved) return;
+          resolved = true;
           cleanup();
           restoreBackdropAfterDialog();
           resolve({ name: '', note: '', cancelled: true });
@@ -5446,6 +6215,7 @@ img, video, canvas { opacity: 0.9; }
         btnCancel.addEventListener('click', onCancel);
         if (btnX) btnX.addEventListener('click', onCancel);
         nameInput.addEventListener('keydown', onKey);
+        if (vpanelBackdrop) vpanelBackdrop.addEventListener('click', onBdClick);
       });
     }
 
@@ -5777,19 +6547,35 @@ img, video, canvas { opacity: 0.9; }
     const stopBtn = $('#stopBtn');
     const attackProgressLabel = $('#attackProgressLabel');
 
+    function syncSendButtonsLabel(isBatch) {
+      const label = isBatch ? 'Start SQLi ATK' : 'Send Request';
+      [sendBtn, $('#payloadSendBtn')].forEach((btn) => {
+        if (!btn) return;
+        const textEl = btn.querySelector('.btn-text');
+        if (textEl) textEl.textContent = label;
+        else btn.textContent = label;
+        btn.classList.toggle('attack-mode', !!isBatch);
+      });
+    }
+
     function refreshAttackPanel() {
       const { isBatch, payloads } = detectAttackMode();
+      const attackBtn = $('#payloadAttackBtn');
       if (isBatch) {
-        attackConfigPanel.classList.remove('hidden');
-        attackExpandCount.textContent = `${payloads.length} payloads`;
-        const preview = payloads.slice(0, 12).map(p => `<span>${escapeHtml(p.text.slice(0, 40))}</span>`).join('');
-        attackPreview.innerHTML = preview + (payloads.length > 12 ? `<span>+${payloads.length - 12} more</span>` : '');
-        sendBtn.querySelector('.btn-text').textContent = 'Start SQLi ATK';
-        sendBtn.classList.add('attack-mode');
+        if (attackExpandCount) attackExpandCount.textContent = `${payloads.length} payloads`;
+        if (attackPreview) {
+          const preview = payloads.slice(0, 12).map(p => `<span>${escapeHtml(p.text.slice(0, 40))}</span>`).join('');
+          attackPreview.innerHTML = preview + (payloads.length > 12 ? `<span>+${payloads.length - 12} more</span>` : '');
+        }
+        if (attackBtn) attackBtn.classList.remove('hidden');
+        syncSendButtonsLabel(true);
       } else {
-        attackConfigPanel.classList.add('hidden');
-        sendBtn.querySelector('.btn-text').textContent = 'Send Request';
-        sendBtn.classList.remove('attack-mode');
+        if (attackBtn) attackBtn.classList.add('hidden');
+        // Close attack config panel if open when leaving batch mode
+        if (attackConfigPanel && attackConfigPanel.classList.contains('open') && typeof closeVPanel === 'function') {
+          closeVPanel('attack-config');
+        }
+        syncSendButtonsLabel(false);
       }
     }
 
@@ -5817,9 +6603,13 @@ img, video, canvas { opacity: 0.9; }
         state.attack.paused = false;
         state.attack.stop = false;
         state.attack.active = false;
-        sendBtn.classList.remove('loading');
-        sendBtn.disabled = false;
+        state._attackLock = false;
         state.isSending = false;
+        [sendBtn, $('#payloadSendBtn')].forEach((b) => {
+          if (!b) return;
+          b.classList.remove('loading');
+          b.disabled = false;
+        });
       } else {
         urlProgressBar.classList.add('active');
       }
@@ -5934,6 +6724,7 @@ img, video, canvas { opacity: 0.9; }
         note: '',
       };
       state.history.push(entry);
+      if (typeof scheduleHistorySave === 'function') scheduleHistorySave();
 
       // Discover endpoints while recording (manual Send / attack too)
       if (state.recording) {
@@ -6049,10 +6840,39 @@ img, video, canvas { opacity: 0.9; }
     }
 
     async function runAttack(payloads) {
+      // Guard against double-start (dialog wait used to leave isSending=false)
+      if (state.attack.active || state._attackLock) return;
+      state._attackLock = true;
+      state.isSending = true;
+      [sendBtn, $('#payloadSendBtn')].forEach((b) => {
+        if (!b) return;
+        b.classList.add('loading');
+        b.disabled = true;
+      });
+
       // Custom modal instead of browser prompt
       const defaultName = 'Attack ' + new Date().toLocaleTimeString();
-      const meta = await promptAttackMeta(defaultName);
+      let meta;
+      try {
+        meta = await promptAttackMeta(defaultName);
+      } catch (e) {
+        state._attackLock = false;
+        state.isSending = false;
+        [sendBtn, $('#payloadSendBtn')].forEach((b) => {
+          if (!b) return;
+          b.classList.remove('loading');
+          b.disabled = false;
+        });
+        return;
+      }
       if (meta.cancelled) {
+        state._attackLock = false;
+        state.isSending = false;
+        [sendBtn, $('#payloadSendBtn')].forEach((b) => {
+          if (!b) return;
+          b.classList.remove('loading');
+          b.disabled = false;
+        });
         showToast('Attack cancelled');
         return;
       }
@@ -6074,18 +6894,18 @@ img, video, canvas { opacity: 0.9; }
         matchHits: 0,
         stopCfg,
       };
-      // Keep UI interactive — only guard against double-start
-      state.isSending = true;
-      sendBtn.classList.add('loading');
       // Do NOT disable entire chrome; pause/stop must stay clickable
       setAttackControls(true);
       document.body.classList.add('attack-running');
-      // Free the UI: close non-pinned payload (backdrop was locking the page)
-      const pw = $('#payloadWorkbench');
-      if (pw && pw.classList.contains('open') && !pw.classList.contains('pinned')) {
-        pw.classList.remove('open');
+      // Keep Payload open in solo; on main close non-pinned payload so dialog/backdrop don't trap UI
+      if (!document.body.classList.contains('solo-payload')) {
+        const pw = $('#payloadWorkbench');
+        if (pw && pw.classList.contains('open') && !pw.classList.contains('pinned')) {
+          pw.classList.remove('open');
+        }
+        if (typeof closeVPanel === 'function') closeVPanel('attack-config');
+        if (vpanelBackdrop) vpanelBackdrop.classList.remove('open');
       }
-      if (vpanelBackdrop) vpanelBackdrop.classList.remove('open');
       setProgress(0, payloads.length);
 
       // Save full attack source so it can be restored later
@@ -6111,75 +6931,84 @@ img, video, canvas { opacity: 0.9; }
       if (historyStatusFilter) historyStatusFilter.value = 'batch:' + batchId;
 
       let baselineSize = null;
-      let queue = payloads.map((p, i) => ({ ...p, attackIndex: i }));
-      let running = 0;
+      // One queue entry per payload index — workers only shift once (no double-send)
+      const queue = payloads.map((p, i) => ({ ...p, attackIndex: i }));
       let stoppedEarly = false;
+      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-      await new Promise((resolve) => {
-        const pump = async () => {
-          if (state.attack.stop) { stoppedEarly = true; resolve(); return; }
-          while (state.attack.paused && !state.attack.stop) {
-            await new Promise(r => setTimeout(r, 100));
+      const processOne = async (p) => {
+        if (state.attack.stop) return;
+        const url = applySinglePayload(urlTemplate, p.text);
+        const postBody = applySinglePayload(postBodyTemplate, p.text);
+        const entry = await executeOneRequest(
+          url, method, postBody, customHeaders, p.text, batchId, attackName, p.attackIndex
+        );
+        if (attackNote) entry.note = attackNote;
+        state.attack.done++;
+        setProgress(state.attack.done, state.attack.total);
+        state.activeHistoryId = entry.id;
+
+        const now = Date.now();
+        if (!state.attack._lastUi || now - state.attack._lastUi > 350 || state.attack.paused || state.attack.stop) {
+          state.attack._lastUi = now;
+          if (typeof displayResponse === 'function') displayResponse(entry.response, entry.url);
+          if (typeof renderHistory === 'function') renderHistory();
+        }
+
+        if (baselineSize == null && entry.response.status > 0) {
+          baselineSize = (entry.response.body || '').length;
+        }
+        if (!state.attack.stop && shouldStopAttack(entry, stopCfg, baselineSize)) {
+          state.attack.matchHits = (state.attack.matchHits || 0) + 1;
+          if (state.attack.matchHits >= (stopCfg.matchTimes || 1)) {
+            queue.length = 0;
+            if (stopCfg.action === 'stop') {
+              state.attack.stop = true;
+              stoppedEarly = true;
+              urlProgressBar?.classList.remove('active');
+              showToast(`Stop condition met (${state.attack.matchHits}×): ${p.text.slice(0, 40)}`);
+            } else {
+              state.attack.paused = true;
+              if (pauseBtn) pauseBtn.textContent = 'Resume';
+              urlProgressBar?.classList.remove('active');
+              showToast(`Pause condition met (${state.attack.matchHits}×): ${p.text.slice(0, 40)}`);
+            }
           }
-          if (state.attack.stop) { stoppedEarly = true; resolve(); return; }
-          if (queue.length === 0 && running === 0) { resolve(); return; }
+        }
+        if (delay > 0 && !state.attack.stop) await sleep(delay);
+      };
 
-          while (running < threads && queue.length > 0 && !state.attack.stop) {
-            const p = queue.shift();
-            running++;
-            (async () => {
-              const url = applySinglePayload(urlTemplate, p.text);
-              const postBody = applySinglePayload(postBodyTemplate, p.text);
-              const entry = await executeOneRequest(url, method, postBody, customHeaders, p.text, batchId, attackName, p.attackIndex);
-              if (attackNote) entry.note = attackNote;
-              state.attack.done++;
-              setProgress(state.attack.done, state.attack.total);
-
-              state.activeHistoryId = entry.id;
-              // Throttle heavy UI so pause/stop stay responsive
-              const now = Date.now();
-              if (!state.attack._lastUi || now - state.attack._lastUi > 350 || state.attack.paused || state.attack.stop) {
-                state.attack._lastUi = now;
-                displayResponse(entry.response, entry.url);
-                renderHistory();
-              }
-
-              if (baselineSize == null && entry.response.status > 0) {
-                baselineSize = (entry.response.body || '').length;
-              }
-              if (!state.attack.stop && shouldStopAttack(entry, stopCfg, baselineSize)) {
-                state.attack.matchHits = (state.attack.matchHits || 0) + 1;
-                if (state.attack.matchHits >= (stopCfg.matchTimes || 1)) {
-                  queue.length = 0; // no new workers
-                  if (stopCfg.action === 'stop') {
-                    state.attack.stop = true;
-                    stoppedEarly = true;
-                    urlProgressBar?.classList.remove('active');
-                    showToast(`Stop condition met (${state.attack.matchHits}×): ${p.text.slice(0, 40)}`);
-                  } else {
-                    state.attack.paused = true;
-                    if (pauseBtn) pauseBtn.textContent = 'Resume';
-                    urlProgressBar?.classList.remove('active');
-                    showToast(`Pause condition met (${state.attack.matchHits}×): ${p.text.slice(0, 40)}`);
-                  }
-                }
-              }
-
-              if (delay > 0 && !state.attack.stop) await new Promise(r => setTimeout(r, delay));
-              running--;
-              pump();
-            })();
+      // Worker pool: each worker pulls next item; an item is never processed twice
+      const worker = async () => {
+        while (!state.attack.stop) {
+          while (state.attack.paused && !state.attack.stop) await sleep(80);
+          if (state.attack.stop) break;
+          const p = queue.shift();
+          if (!p) break;
+          try {
+            await processOne(p);
+          } catch (err) {
+            console.warn('[attack] worker error', err);
+            state.attack.done++;
+            setProgress(state.attack.done, state.attack.total);
           }
-        };
-        pump();
-      });
+        }
+      };
+
+      const nWorkers = Math.max(1, Math.min(threads, payloads.length));
+      await Promise.all(Array.from({ length: nWorkers }, () => worker()));
+      if (state.attack.stop) stoppedEarly = true;
 
       state.isSending = false;
-      sendBtn.classList.remove('loading');
-      sendBtn.disabled = false;
+      state._attackLock = false;
+      [sendBtn, $('#payloadSendBtn')].forEach((b) => {
+        if (!b) return;
+        b.classList.remove('loading');
+        b.disabled = false;
+      });
       setAttackControls(false);
       renderHistory();
-      setPayloadCollapsed(true);
+      if (typeof setPayloadCollapsed === 'function') setPayloadCollapsed(true);
       showToast(
         stoppedEarly
           ? `Attack stopped — ${state.attack.done}/${state.attack.total}`
@@ -6189,7 +7018,7 @@ img, video, canvas { opacity: 0.9; }
     }
 
     async function sendRequest() {
-      if (state.attack.active) return;
+      if (state.attack.active || state._attackLock) return;
       if (state.isSending) return;
 
       const url = urlInput.value.trim();
@@ -6211,8 +7040,11 @@ img, video, canvas { opacity: 0.9; }
 
       // Single request
       state.isSending = true;
-      sendBtn.classList.add('loading');
-      sendBtn.disabled = true;
+      [sendBtn, $('#payloadSendBtn')].forEach((b) => {
+        if (!b) return;
+        b.classList.add('loading');
+        b.disabled = true;
+      });
 
       const method = methodSelect.value;
       const payload = payloadInput.value.trim();
@@ -6237,11 +7069,14 @@ img, video, canvas { opacity: 0.9; }
       renderHistory();
 
       state.isSending = false;
-      sendBtn.classList.remove('loading');
-      sendBtn.disabled = false;
+      [sendBtn, $('#payloadSendBtn')].forEach((b) => {
+        if (!b) return;
+        b.classList.remove('loading');
+        b.disabled = false;
+      });
 
       // Free vertical space for response analysis after send
-      setPayloadCollapsed(true);
+      if (typeof setPayloadCollapsed === 'function') setPayloadCollapsed(true);
 
       if (entry.response.status > 0) {
         showToast(`#${entry.id} → ${entry.response.status} (${entry.response.timeMs}ms)`, 'success');
@@ -6249,6 +7084,17 @@ img, video, canvas { opacity: 0.9; }
     }
 
     sendBtn.addEventListener('click', sendRequest);
+    $('#payloadSendBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      sendRequest();
+    });
+    $('#payloadAttackBtn')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof openVPanel === 'function') openVPanel('attack-config');
+      else attackConfigPanel?.classList.add('open');
+    });
     document.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
@@ -6871,8 +7717,132 @@ img, video, canvas { opacity: 0.9; }
       $('#payloadLibSearch')?.addEventListener('input', renderPayloadLibrary);
     }
 
+    // ===== History persistence (cross-tab: main ↔ New tab History) =====
+    const HISTORY_LS_KEY = 'sqli-workbench-history-v1';
+    const HISTORY_MAX_ITEMS = 200;
+    const HISTORY_BODY_MAX = 32 * 1024;
+    let _historySaveTimer = null;
+    let _historySaveSkip = false; // avoid echo when applying storage event
+
+    function serializeHistoryForStorage() {
+      const items = state.history.slice(-HISTORY_MAX_ITEMS).map((h) => {
+        const copy = {
+          id: h.id,
+          name: h.name,
+          method: h.method,
+          url: h.url,
+          originalUrl: h.originalUrl,
+          payload: h.payload,
+          postBody: h.postBody,
+          headers: h.headers ? { ...h.headers } : {},
+          response: h.response ? { ...h.response } : {},
+          pinned: !!h.pinned,
+          timestamp: h.timestamp,
+          batchId: h.batchId || null,
+          batchName: h.batchName || null,
+          attackIndex: h.attackIndex != null ? h.attackIndex : null,
+          note: h.note || '',
+        };
+        if (copy.response) {
+          const body = copy.response.body;
+          if (typeof body === 'string' && body.length > HISTORY_BODY_MAX) {
+            copy.response.body = body.slice(0, HISTORY_BODY_MAX) + '\n…[truncated for sync]';
+          }
+          if (typeof copy.response.fixedHtml === 'string' && copy.response.fixedHtml.length > HISTORY_BODY_MAX) {
+            copy.response.fixedHtml = copy.response.fixedHtml.slice(0, HISTORY_BODY_MAX);
+          }
+        }
+        return copy;
+      });
+      return {
+        history: items,
+        nextId: state.nextId,
+        attackSources: state.attackSources || {},
+        activeHistoryId: state.activeHistoryId,
+        ts: Date.now(),
+      };
+    }
+
+    function saveHistoryToStorage() {
+      if (_historySaveSkip) return;
+      try {
+        localStorage.setItem(HISTORY_LS_KEY, JSON.stringify(serializeHistoryForStorage()));
+      } catch (e) {
+        try {
+          const slim = serializeHistoryForStorage();
+          slim.history = slim.history.slice(-40).map((h) => {
+            if (h.response) {
+              h.response.body = typeof h.response.body === 'string' ? h.response.body.slice(0, 4000) : '';
+              h.response.fixedHtml = null;
+            }
+            return h;
+          });
+          localStorage.setItem(HISTORY_LS_KEY, JSON.stringify(slim));
+        } catch { /* ignore quota */ }
+      }
+    }
+
+    function scheduleHistorySave() {
+      clearTimeout(_historySaveTimer);
+      _historySaveTimer = setTimeout(saveHistoryToStorage, 120);
+    }
+
+    function loadHistoryFromStorage() {
+      try {
+        const raw = localStorage.getItem(HISTORY_LS_KEY);
+        if (!raw) return false;
+        const data = JSON.parse(raw);
+        if (!data || !Array.isArray(data.history)) return false;
+        state.history = data.history;
+        if (typeof data.nextId === 'number') {
+          state.nextId = Math.max(state.nextId || 1, data.nextId);
+        }
+        if (data.attackSources && typeof data.attackSources === 'object') {
+          state.attackSources = data.attackSources;
+        }
+        if (data.activeHistoryId != null) state.activeHistoryId = data.activeHistoryId;
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function applyHistoryFromStorageEvent(raw) {
+      clearTimeout(_historySaveTimer);
+      _historySaveSkip = true;
+      try {
+        const data = JSON.parse(raw || 'null');
+        if (!data || !Array.isArray(data.history)) return;
+        state.history = data.history;
+        if (typeof data.nextId === 'number') {
+          state.nextId = Math.max(state.nextId || 1, data.nextId);
+        }
+        if (data.attackSources && typeof data.attackSources === 'object') {
+          state.attackSources = data.attackSources;
+        }
+        if (typeof renderHistory === 'function') renderHistory();
+        if (typeof renderHfChips === 'function') renderHfChips();
+      } catch { /* ignore */ }
+      // Keep skip until after debounced window so renderHistory side-effects don't echo
+      setTimeout(() => { _historySaveSkip = false; }, 250);
+    }
+
+    /** Keep --topbar-h in sync so drawers sit below the top bar (header always visible). */
+    function syncTopbarHeight() {
+      const tb = document.querySelector('.top-bar');
+      if (!tb) return;
+      // Solo Settings / History hide the top-bar → offset 0
+      // Solo Payload keeps the top-bar (URL/method/Send) → measure it
+      if (document.body.classList.contains('solo-panel') && !document.body.classList.contains('solo-payload')) {
+        document.documentElement.style.setProperty('--topbar-h', '0px');
+        return;
+      }
+      const h = Math.ceil(tb.getBoundingClientRect().height);
+      document.documentElement.style.setProperty('--topbar-h', (h > 0 ? h : 56) + 'px');
+    }
+
     // ===== Solo panel / Open in new browser tab =====
-    // ?panel=settings | ?panel=payload
+    // ?panel=settings | ?panel=payload | ?panel=history
     // Sync via localStorage + `storage` event (simple, no BroadcastChannel).
 
     const PAYLOAD_DRAFT_KEY = 'sqli-workbench-payload-draft';
@@ -6921,9 +7891,12 @@ img, video, canvas { opacity: 0.9; }
         showToast('Already in this tab', '');
         return;
       }
-      // Persist payload draft so the new tab picks it up immediately
-      if (name === 'payload' && payloadInput) {
-        try { localStorage.setItem(PAYLOAD_DRAFT_KEY, payloadInput.value || ''); } catch { /* ignore */ }
+      // Persist payload draft + target URL so the new tab picks them up immediately
+      if (name === 'payload') {
+        if (payloadInput) {
+          try { localStorage.setItem(PAYLOAD_DRAFT_KEY, payloadInput.value || ''); } catch { /* ignore */ }
+        }
+        if (typeof saveTargetUrl === 'function') saveTargetUrl();
       }
       const url = new URL(window.location.href);
       url.searchParams.set('panel', name);
@@ -6964,6 +7937,7 @@ img, video, canvas { opacity: 0.9; }
         activeVPanel = name;
         bindSoloCloseButton(panel);
       }
+      if (typeof syncTopbarHeight === 'function') syncTopbarHeight();
     }
 
     function loadPayloadDraft() {
@@ -6987,6 +7961,35 @@ img, video, canvas { opacity: 0.9; }
         clearTimeout(_payloadDraftTimer);
         _payloadDraftTimer = setTimeout(savePayloadDraft, 200);
       });
+    }
+
+    // Target URL + method shared across tabs (solo Payload needs this)
+    const TARGET_URL_KEY = 'sqli-workbench-target-url';
+    const TARGET_METHOD_KEY = 'sqli-workbench-target-method';
+    let _targetUrlTimer = null;
+    function saveTargetUrl() {
+      try {
+        if (urlInput) localStorage.setItem(TARGET_URL_KEY, urlInput.value || '');
+        if (methodSelect) localStorage.setItem(TARGET_METHOD_KEY, methodSelect.value || 'GET');
+      } catch { /* ignore */ }
+    }
+    function loadTargetUrl() {
+      try {
+        const u = localStorage.getItem(TARGET_URL_KEY);
+        const m = localStorage.getItem(TARGET_METHOD_KEY);
+        if (urlInput && u != null && !(urlInput.value || '').trim()) urlInput.value = u;
+        if (methodSelect && m) methodSelect.value = m;
+      } catch { /* ignore */ }
+    }
+    function bindTargetUrlSync() {
+      loadTargetUrl();
+      const schedule = () => {
+        clearTimeout(_targetUrlTimer);
+        _targetUrlTimer = setTimeout(saveTargetUrl, 150);
+      };
+      urlInput?.addEventListener('input', schedule);
+      urlInput?.addEventListener('change', schedule);
+      methodSelect?.addEventListener('change', schedule);
     }
 
     function bindPanelPopoutButtons() {
@@ -7152,6 +8155,16 @@ img, video, canvas { opacity: 0.9; }
             } catch { /* ignore */ }
             if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
           }
+        } else if (e.key === TARGET_URL_KEY) {
+          if (urlInput && e.newValue != null && urlInput.value !== e.newValue) {
+            urlInput.value = e.newValue;
+          }
+        } else if (e.key === TARGET_METHOD_KEY) {
+          if (methodSelect && e.newValue && methodSelect.value !== e.newValue) {
+            methodSelect.value = e.newValue;
+          }
+        } else if (e.key === HISTORY_LS_KEY) {
+          applyHistoryFromStorageEvent(e.newValue);
         }
       });
     }
@@ -7178,6 +8191,7 @@ img, video, canvas { opacity: 0.9; }
       renderHeaders();
       renderCheatSheet();
       renderHfChips();
+      loadHistoryFromStorage();
       renderHistory();
       urlInput.value = '';
       payloadInput.value = '';
@@ -7196,9 +8210,15 @@ img, video, canvas { opacity: 0.9; }
       bindPanelPopoutButtons();
       bindPayloadToolsMenu();
       bindPayloadDraftSync();
+      bindTargetUrlSync();
       bindCrossTabSync();
+      bindHistResponseUI();
+      syncTopbarHeight();
+      window.addEventListener('resize', syncTopbarHeight);
       if (isSoloSettings) enterSoloPanelMode('settings');
       if (isSoloPayload) enterSoloPanelMode('payload');
       if (isSoloHistory) enterSoloPanelMode('history');
+      // Solo mode hides top-bar — re-sync so drawers/full panels use correct offset
+      syncTopbarHeight();
     }
     init();

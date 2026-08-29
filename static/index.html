@@ -247,6 +247,7 @@
           </div>
         </div>
         <button type="button" class="pin-btn" id="payloadPopoutBtn" title="Open Payload in a new browser tab">↗</button>
+        <button type="button" class="pin-btn shelf-btn" id="payloadShelfBtn" title="Minimize / restore this panel (shelf) — same as tray / per-panel Alt+I" hidden>↓</button>
         <button type="button" class="pin-btn" id="payloadPinBtn" title="Pin panel — keep open while working">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
@@ -258,97 +259,8 @@
           title="Each line maps to $1, $2, $3... · Use {1..10} or {1,2,3} for batch attack"
           style="min-height:88px;max-height:180px;"></textarea>
         <button type="button" class="payload-save-btn" id="payloadSaveBtn" title="Save payload to library">Save</button>
+        <button type="button" class="payload-attack-btn hidden" id="payloadAttackBtn" title="Attack config — threads, delay, stop conditions">Attack</button>
         <div id="autocompleteBox" class="autocomplete-box hidden"></div>
-      </div>
-      <div id="attackConfigPanel" class="attack-config-panel hidden">
-        <div class="attack-config-header" id="attackConfigHeader" title="Click to minimize / expand">
-          <span class="attack-badge">⚡ SQLi ATK Mode</span>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span id="attackExpandCount" class="attack-expand-count">0 payloads</span>
-            <button type="button" class="atk-min-btn" id="atkMinBtn" title="Minimize">▾</button>
-          </div>
-        </div>
-        <div class="attack-config-grid">
-          <label class="attack-field">
-            <span>Threads</span>
-            <input type="number" id="atkThreads" min="1" max="50" value="3" />
-          </label>
-          <label class="attack-field">
-            <span>Delay (ms)</span>
-            <input type="number" id="atkDelay" min="0" max="60000" value="200" step="50" />
-          </label>
-          <label class="attack-field">
-            <span>Timeout (s)</span>
-            <input type="number" id="atkTimeout" min="1" max="120" value="15" />
-          </label>
-          <label class="attack-field">
-            <span>On match</span>
-            <select id="atkMatchAction">
-              <option value="pause" selected>Pause</option>
-              <option value="stop">Stop</option>
-            </select>
-          </label>
-          <label class="attack-field">
-            <span>Match ×</span>
-            <input type="number" id="atkMatchTimes" min="1" max="100" value="1" title="How many times condition must match" />
-          </label>
-        </div>
-        <div class="atk-stop-bar">
-          <button type="button" class="btn btn-sm" id="atkStopOpenBtn" style="border-color:rgba(255,217,61,0.45);color:#ffd93d;">⚙ Stop conditions</button>
-          <span class="atk-stop-summary" id="atkStopSummary">No conditions · never auto-pause</span>
-        </div>
-        <!-- Stop conditions overlay (history-filter style) -->
-        <div class="atk-stop-overlay" id="atkStopOverlay">
-          <div class="atk-stop-overlay-head">
-            <strong>Stop / Pause conditions</strong>
-            <button type="button" class="btn btn-sm btn-ghost" id="atkStopClose">✕</button>
-          </div>
-          <div class="atk-stop-overlay-body">
-            <p class="atk-stop-hint">All enabled checks are <b>AND</b>. Regex fields support <code>!pattern</code> to invert (must NOT match). Pure regex alternative: <code>^(?!.*word).*$</code></p>
-            <div class="atk-stop-grid">
-              <label class="atk-stop-row"><input type="checkbox" id="atkCond2xx" /> Status 2xx</label>
-              <label class="atk-stop-row"><input type="checkbox" id="atkCond3xx" /> Status 3xx</label>
-              <label class="atk-stop-row"><input type="checkbox" id="atkCond4xx" /> Status 4xx</label>
-              <label class="atk-stop-row"><input type="checkbox" id="atkCond5xx" /> Status 5xx</label>
-              <label class="atk-stop-row"><input type="checkbox" id="atkCond0" /> Network error (0)</label>
-              <label class="atk-stop-row"><input type="checkbox" id="atkCondSql" /> SQL error signatures</label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondStatus" /> Status codes
-                <input type="text" id="atkCondStatusVal" class="atk-stop-input" placeholder="200,500 or 200-299" />
-              </label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondBody" /> Body regex
-                <input type="text" id="atkCondBodyVal" class="atk-stop-input" placeholder="mysql|syntax  or  !welcome" title="Prefix ! to invert" />
-              </label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondUrl" /> URL regex
-                <input type="text" id="atkCondUrlVal" class="atk-stop-input" placeholder="id=  or  !logout" title="Prefix ! to invert" />
-              </label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondTime" /> Time ≥ ms
-                <input type="number" id="atkCondTimeVal" class="atk-stop-input" min="0" placeholder="5000" />
-              </label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondSize" /> Body size
-                <select id="atkCondSizeOp" class="atk-stop-input" style="flex:0;min-width:70px;">
-                  <option value="gt">≥</option>
-                  <option value="lt">≤</option>
-                  <option value="eq">=</option>
-                </select>
-                <input type="number" id="atkCondSizeVal" class="atk-stop-input" min="0" placeholder="bytes" />
-              </label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondSizeDiff" /> Body size Δ vs first ≥
-                <input type="number" id="atkCondSizeDiffVal" class="atk-stop-input" min="0" placeholder="50" value="50" />
-              </label>
-            </div>
-          </div>
-          <div class="atk-stop-overlay-foot">
-            <button type="button" class="btn btn-sm btn-ghost" id="atkStopClear">Clear all</button>
-            <button type="button" class="btn btn-sm btn-primary" id="atkStopDone">Done</button>
-          </div>
-        </div>
-        <div id="attackPreview" class="attack-preview"></div>
       </div>
       <div class="payload-label-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 6px;">
         <span class="payload-label" style="margin:0;">Payload lines</span>
@@ -376,6 +288,10 @@
         <button type="button" id="payloadLibraryBtnEmbed" class="btn btn-sm payload-embed-tool" title="Saved payloads">Saved</button>
         <button type="button" id="charTableBtnEmbed" class="btn btn-sm payload-embed-tool" title="Character table">Tables</button>
         <button id="clearPayloadBtn" class="btn btn-sm btn-ghost">Clear</button>
+        <button type="button" id="payloadSendBtn" class="btn btn-sm btn-primary payload-send-btn" title="Send Request (Ctrl+Enter) — same as top bar">
+          <span class="btn-text">Send Request</span>
+          <span class="spinner"></span>
+        </button>
         <button id="injectBtn" class="btn btn-sm" style="margin-left:auto; border-color:var(--accent); color:var(--accent);">
           Inject into Target
         </button>
@@ -434,6 +350,7 @@
       <h2>Request History</h2>
       <div class="vpanel-header-actions">
         <button type="button" class="pin-btn" id="historyPopoutBtn" title="Open History in a new browser tab">↗</button>
+        <button type="button" class="pin-btn shelf-btn" id="historyShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
         <button type="button" class="pin-btn" id="historyPinBtn" title="Pin panel — detach & resize">Pin</button>
         <button id="focusHistoryBtn" class="btn btn-sm btn-ghost hidden" title="Focus history">⛶</button>
         <button id="clearHistoryBtn" class="btn btn-sm btn-ghost" title="Clear unpinned history">Clear</button>
@@ -506,6 +423,7 @@
     <div class="vpanel-header" id="toolsDragHandle">
       <h2>Tools</h2>
       <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn shelf-btn" id="toolsShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
         <button type="button" class="pin-btn" id="toolsPinBtn" title="Pin panel">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
@@ -555,6 +473,7 @@
     <div class="vpanel-header" id="cheatDragHandle">
       <h2>Cheat Sheet</h2>
       <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn shelf-btn" id="cheatShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
         <button type="button" class="pin-btn" id="cheatPinBtn" title="Pin panel">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
@@ -577,6 +496,7 @@
     <div class="vpanel-header" id="proxyDragHandle">
       <h2>Proxy</h2>
       <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn shelf-btn" id="proxyShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
         <button type="button" class="pin-btn" id="proxyPinBtn" title="Pin panel">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
@@ -621,6 +541,7 @@
     <div class="vpanel-header" id="converterDragHandle">
       <h2>Converter</h2>
       <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn shelf-btn" id="converterShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
         <button type="button" class="pin-btn" id="converterPinBtn" title="Pin panel">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
@@ -675,6 +596,7 @@
     <div class="vpanel-header" id="payloadLibDragHandle">
       <h2>Saved Payloads</h2>
       <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn shelf-btn" id="payloadLibShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
         <button type="button" class="pin-btn" id="payloadLibPinBtn" title="Pin panel">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
@@ -702,6 +624,7 @@
       <h2>Settings</h2>
       <div class="vpanel-header-actions">
         <button type="button" class="pin-btn" id="settingsPopoutBtn" title="Open Settings in a new browser tab">↗ New tab</button>
+        <button type="button" class="pin-btn shelf-btn" id="settingsShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
         <button type="button" class="pin-btn" id="settingsPinBtn" title="Pin panel">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
@@ -719,6 +642,8 @@
         <div class="cookie-mgr-header">
           <strong>Cookie manager</strong>
           <button type="button" class="btn btn-sm btn-ghost" id="cookieMgrAdd" title="Add cookie">+ Add</button>
+          <button type="button" class="btn btn-sm btn-ghost" id="cookieMgrImportBtn" title="Import cookies from file or text" style="border-color:rgba(0,229,255,0.35);color:var(--accent-cyan);">Import</button>
+          <button type="button" class="btn btn-sm btn-ghost" id="cookieMgrExportBtn" title="Export cookies" style="border-color:rgba(255,217,61,0.35);color:#ffd93d;">Export</button>
           <button type="button" class="btn btn-sm" id="cookieMgrClose" style="margin-left:auto;">✕ Close</button>
         </div>
         <div class="cookie-mgr-body" id="cookieMgrBody"></div>
@@ -918,6 +843,224 @@
   <div id="payloadSummary" class="hidden"></div>
   <div id="resizeCheat" class="hidden"></div>
   <div id="resizeHistory" class="hidden"></div>
+
+  <div class="vpanel float-center attack-config-vpanel" id="attackConfigPanel" data-panel="attack-config">
+    <div class="resize-grip n" data-resize="n"></div>
+    <div class="resize-grip s" data-resize="s"></div>
+    <div class="resize-grip e" data-resize="e"></div>
+    <div class="resize-grip w" data-resize="w"></div>
+    <div class="vpanel-header" id="attackConfigDragHandle">
+      <h2>Attack Config</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body attack-config-panel" style="padding:0;">
+        <div class="attack-config-header" id="attackConfigHeader" title="Click to minimize / expand">
+          <span class="attack-badge">⚡ SQLi ATK Mode</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span id="attackExpandCount" class="attack-expand-count">0 payloads</span>
+            <button type="button" class="atk-min-btn" id="atkMinBtn" title="Minimize">▾</button>
+          </div>
+        </div>
+        <div class="attack-config-grid">
+          <label class="attack-field">
+            <span>Threads</span>
+            <input type="number" id="atkThreads" min="1" max="50" value="3" />
+          </label>
+          <label class="attack-field">
+            <span>Delay (ms)</span>
+            <input type="number" id="atkDelay" min="0" max="60000" value="200" step="50" />
+          </label>
+          <label class="attack-field">
+            <span>Timeout (s)</span>
+            <input type="number" id="atkTimeout" min="1" max="120" value="15" />
+          </label>
+          <label class="attack-field">
+            <span>On match</span>
+            <select id="atkMatchAction">
+              <option value="pause" selected>Pause</option>
+              <option value="stop">Stop</option>
+            </select>
+          </label>
+          <label class="attack-field">
+            <span>Match ×</span>
+            <input type="number" id="atkMatchTimes" min="1" max="100" value="1" title="How many times condition must match" />
+          </label>
+        </div>
+        <div class="atk-stop-bar">
+          <button type="button" class="btn btn-sm" id="atkStopOpenBtn" style="border-color:rgba(255,217,61,0.45);color:#ffd93d;">⚙ Stop conditions</button>
+          <span class="atk-stop-summary" id="atkStopSummary">No conditions · never auto-pause</span>
+        </div>
+        <!-- Stop conditions overlay (history-filter style) -->
+        <div class="atk-stop-overlay" id="atkStopOverlay">
+          <div class="atk-stop-overlay-head">
+            <strong>Stop / Pause conditions</strong>
+            <button type="button" class="btn btn-sm btn-ghost" id="atkStopClose">✕</button>
+          </div>
+          <div class="atk-stop-overlay-body">
+            <p class="atk-stop-hint">All enabled checks are <b>AND</b>. Regex fields support <code>!pattern</code> to invert (must NOT match). Pure regex alternative: <code>^(?!.*word).*$</code></p>
+            <div class="atk-stop-grid">
+              <label class="atk-stop-row"><input type="checkbox" id="atkCond2xx" /> Status 2xx</label>
+              <label class="atk-stop-row"><input type="checkbox" id="atkCond3xx" /> Status 3xx</label>
+              <label class="atk-stop-row"><input type="checkbox" id="atkCond4xx" /> Status 4xx</label>
+              <label class="atk-stop-row"><input type="checkbox" id="atkCond5xx" /> Status 5xx</label>
+              <label class="atk-stop-row"><input type="checkbox" id="atkCond0" /> Network error (0)</label>
+              <label class="atk-stop-row"><input type="checkbox" id="atkCondSql" /> SQL error signatures</label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondStatus" /> Status codes
+                <input type="text" id="atkCondStatusVal" class="atk-stop-input" placeholder="200,500 or 200-299" />
+              </label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondBody" /> Body regex
+                <input type="text" id="atkCondBodyVal" class="atk-stop-input" placeholder="mysql|syntax  or  !welcome" title="Prefix ! to invert" />
+              </label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondUrl" /> URL regex
+                <input type="text" id="atkCondUrlVal" class="atk-stop-input" placeholder="id=  or  !logout" title="Prefix ! to invert" />
+              </label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondTime" /> Time ≥ ms
+                <input type="number" id="atkCondTimeVal" class="atk-stop-input" min="0" placeholder="5000" />
+              </label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondSize" /> Body size
+                <select id="atkCondSizeOp" class="atk-stop-input" style="flex:0;min-width:70px;">
+                  <option value="gt">≥</option>
+                  <option value="lt">≤</option>
+                  <option value="eq">=</option>
+                </select>
+                <input type="number" id="atkCondSizeVal" class="atk-stop-input" min="0" placeholder="bytes" />
+              </label>
+              <label class="atk-stop-row atk-stop-wide">
+                <input type="checkbox" id="atkCondSizeDiff" /> Body size Δ vs first ≥
+                <input type="number" id="atkCondSizeDiffVal" class="atk-stop-input" min="0" placeholder="50" value="50" />
+              </label>
+            </div>
+          </div>
+          <div class="atk-stop-overlay-foot">
+            <button type="button" class="btn btn-sm btn-ghost" id="atkStopClear">Clear all</button>
+            <button type="button" class="btn btn-sm btn-primary" id="atkStopDone">Done</button>
+          </div>
+        </div>
+        <div id="attackPreview" class="attack-preview"></div>
+      
+    </div>
+  </div>
+
+
+  <!-- History Response viewer (solo History tab only — opens from per-record button) -->
+  <div class="vpanel float-center hist-response-vpanel" id="histResponsePanel" data-panel="hist-response">
+    <div class="vpanel-header" id="histResponseDragHandle">
+      <h2 id="histResponseTitle">Response</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body hist-response-body">
+      <div class="response-tabs hist-response-tabs">
+        <button type="button" class="tab-btn active" data-hist-tab="rendered">Rendered View</button>
+        <button type="button" class="tab-btn" data-hist-tab="raw">Raw Response</button>
+        <button type="button" class="tab-btn" data-hist-tab="headers">Headers &amp; Metadata</button>
+      </div>
+      <div id="histTabRendered" class="tab-content active hist-tab-pane" data-hist-pane="rendered">
+        <iframe id="histRenderedFrame" class="hist-rendered-frame" sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals" title="Rendered response"></iframe>
+        <div id="histRenderedEmpty" class="hist-rendered-empty">Select a history item and click <strong>Response</strong>.</div>
+      </div>
+      <div id="histTabRaw" class="tab-content hist-tab-pane" data-hist-pane="raw" hidden>
+        <pre id="histRawResponse" class="raw-response hist-raw-response"></pre>
+      </div>
+      <div id="histTabHeaders" class="tab-content hist-tab-pane" data-hist-pane="headers" hidden>
+        <div class="meta-table-wrap" id="histMetaTableWrap">
+          <div class="meta-empty">No metadata available.</div>
+        </div>
+      </div>
+      <div class="response-statusbar hist-response-statusbar">
+        <span>Status: <strong id="histSbStatus">—</strong></span>
+        <span>Time: <strong id="histSbTime">—</strong></span>
+        <span>Size: <strong id="histSbSize">—</strong></span>
+        <span>Type: <strong id="histSbType">—</strong></span>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Cookie Import (virtual panel) -->
+  <div class="vpanel float-center cookie-io-panel" id="cookieBulkImportPanel" data-panel="cookie-bulk-import">
+    <div class="vpanel-header">
+      <h2>Import Cookies</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body cookie-io-body">
+      <div class="cookie-io-section">
+        <div class="cookie-io-label-row">
+          <span class="cookie-io-label">Paste cookies or drop a file</span>
+          <label class="btn btn-sm btn-ghost cookie-io-file-btn">
+            Choose file
+            <input type="file" id="cookieImportFile" accept=".txt,.json,.csv,.cookies,text/*,application/json" hidden />
+          </label>
+        </div>
+        <textarea id="cookieImportText" class="cookie-io-textarea" spellcheck="false" placeholder="Supports:&#10;• Cookie header: session=abc; token=xyz&#10;• name=value per line&#10;• Set-Cookie: session=abc; Path=/; HttpOnly&#10;• Netscape cookies.txt&#10;• JSON (EditThisCookie / array of {name,value})&#10;• CSV: name,value"></textarea>
+        <div class="cookie-io-actions-row">
+          <button type="button" class="btn btn-sm btn-primary" id="cookieImportParseBtn">Detect &amp; Preview</button>
+          <span class="cookie-io-hint" id="cookieImportHint">Paste any common cookie export format</span>
+        </div>
+      </div>
+      <div class="cookie-io-preview-wrap" id="cookieImportPreviewWrap" hidden>
+        <div class="cookie-io-label-row">
+          <span class="cookie-io-label">Preview — select which to import</span>
+          <div style="display:flex;gap:6px;">
+            <button type="button" class="btn btn-sm btn-ghost" id="cookieImportSelAll">All</button>
+            <button type="button" class="btn btn-sm btn-ghost" id="cookieImportSelNone">None</button>
+          </div>
+        </div>
+        <div class="cookie-mgr-body cookie-io-preview-list" id="cookieImportPreview"></div>
+      </div>
+    </div>
+    <div class="cookie-mgr-footer cookie-io-footer">
+      <button type="button" class="btn btn-sm btn-ghost" data-close-panel>Cancel</button>
+      <button type="button" class="btn btn-sm btn-primary" id="cookieImportApplyBtn" disabled>Import selected</button>
+    </div>
+  </div>
+
+  <!-- Cookie Export (virtual panel) -->
+  <div class="vpanel float-center cookie-io-panel" id="cookieBulkExportPanel" data-panel="cookie-bulk-export">
+    <div class="vpanel-header">
+      <h2>Export Cookies</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body cookie-io-body">
+      <div class="cookie-io-section">
+        <div class="cookie-io-label-row">
+          <span class="cookie-io-label">Select cookies to export</span>
+          <div style="display:flex;gap:6px;">
+            <button type="button" class="btn btn-sm btn-ghost" id="cookieExportSelAll">All</button>
+            <button type="button" class="btn btn-sm btn-ghost" id="cookieExportSelNone">None</button>
+          </div>
+        </div>
+        <div class="cookie-mgr-body cookie-io-preview-list" id="cookieExportList"></div>
+      </div>
+      <div class="cookie-io-section">
+        <span class="cookie-io-label">Format</span>
+        <div class="cookie-export-formats" id="cookieExportFormats">
+          <label class="cookie-fmt-opt"><input type="radio" name="cookieExportFmt" value="header" checked /> Cookie header <code>a=1; b=2</code></label>
+          <label class="cookie-fmt-opt"><input type="radio" name="cookieExportFmt" value="lines" /> name=value lines</label>
+          <label class="cookie-fmt-opt"><input type="radio" name="cookieExportFmt" value="json" /> JSON array</label>
+          <label class="cookie-fmt-opt"><input type="radio" name="cookieExportFmt" value="netscape" /> Netscape cookies.txt</label>
+          <label class="cookie-fmt-opt"><input type="radio" name="cookieExportFmt" value="csv" /> CSV (name,value)</label>
+        </div>
+      </div>
+    </div>
+    <div class="cookie-mgr-footer cookie-io-footer">
+      <button type="button" class="btn btn-sm btn-ghost" id="cookieExportCopyBtn">Copy</button>
+      <button type="button" class="btn btn-sm btn-ghost" data-close-panel>Cancel</button>
+      <button type="button" class="btn btn-sm btn-primary" id="cookieExportDownloadBtn">Download</button>
+    </div>
+  </div>
 
   <!-- Attack name / note dialog -->
   <div class="vpanel dialog-modal" id="attackNameDialog" data-panel="attack-dialog">
@@ -1172,5 +1315,7 @@
   <div id="toast" class="toast"></div>
 
   <script src="js/app.js"></script>
+  <!-- TEMP UI debugger — delete this line + static/js/ui-debugger.js to remove -->
+  <script src="js/ui-debugger.js"></script>
 </body>
 </html>
