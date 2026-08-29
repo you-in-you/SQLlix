@@ -4334,13 +4334,7 @@
       .dashboard {
         flex-direction: column;
       }
-      #historyPanel {
-        max-height: 220px;
-        width: 100% !important;
-        min-width: 100% !important;
-        border-right: none;
-        border-bottom: 1px solid var(--border);
-      }
+      /* Do not clamp History virtual panel — caused half-open drawers */
       #resizeHistory, #resizeCheat { display: none; }
     }
 
@@ -6364,11 +6358,305 @@
   white-space: nowrap;
 }
 #historyPanel .vpanel-header-actions {
-  max-width: 75%;
+  max-width: none;
+  overflow: visible;
+  flex-wrap: wrap;
+}
+/* Unpinned History = full-height left drawer (reset any leftover pin geometry) */
+#historyPanel.drawer-left.open:not(.pinned) {
+  top: 0 !important;
+  left: 0 !important;
+  right: auto !important;
+  bottom: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  width: min(400px, 94vw) !important;
+  transform: translateX(0) !important;
+  display: flex !important;
+  flex-direction: column !important;
+}
+#historyPanel.drawer-left.open:not(.pinned) .vpanel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 /* History pinned: ensure real floating window, not full-height drawer */
 #historyPanel.pinned.open {
   bottom: auto !important;
   max-height: none !important;
   height: var(--hist-pin-h, min(70vh, 620px));
+}
+
+/* ===== Solo panel mode (Settings / Payload pop-out in real browser tab) ===== */
+body.solo-settings .top-bar,
+body.solo-settings .main-layout,
+body.solo-settings .backend-offline-float,
+body.solo-settings .vpanel:not(#settingsPanel) {
+  display: none !important;
+}
+
+body.solo-payload .top-bar,
+body.solo-payload .main-layout,
+body.solo-payload .backend-offline-float {
+  display: none !important;
+}
+
+/* Hide unrelated panels; keep payload + companions (library / converter / settings) */
+body.solo-payload .vpanel:not(#payloadWorkbench):not(#payloadLibPanel):not(#converterPanel):not(#settingsPanel) {
+  display: none !important;
+}
+
+body.solo-settings,
+body.solo-payload {
+  overflow: hidden;
+  background: var(--bg-primary, #0e0e10);
+}
+
+/* Primary solo panel: base layer (no !important z-index so companions can stack above) */
+body.solo-settings #settingsPanel,
+body.solo-payload #payloadWorkbench {
+  position: fixed !important;
+  inset: 10px !important;
+  top: 10px !important;
+  left: 10px !important;
+  right: 10px !important;
+  bottom: 10px !important;
+  width: auto !important;
+  height: auto !important;
+  max-height: none !important;
+  max-width: none !important;
+  transform: none !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  z-index: 400;
+  display: flex !important;
+  flex-direction: column;
+}
+
+body.solo-settings #settingsPanel .resize-grip,
+body.solo-settings #settingsPinBtn,
+body.solo-settings #settingsPopoutBtn,
+body.solo-payload #payloadWorkbench .resize-grip,
+body.solo-payload #payloadPinBtn,
+body.solo-payload #payloadPopoutBtn {
+  display: none !important;
+}
+
+body.solo-settings #settingsPanel .vpanel-body,
+body.solo-payload #payloadWorkbench .vpanel-body {
+  flex: 1;
+  overflow: auto;
+  max-height: none !important;
+}
+
+body.solo-settings #settingsPanel .vpanel-header,
+body.solo-payload #payloadWorkbench .vpanel-header {
+  cursor: default !important;
+}
+
+body.solo-payload #payloadWorkbench .payload-textarea {
+  max-height: none !important;
+  min-height: 160px;
+}
+
+/* Companions must paint above the full-page solo panel */
+body.solo-payload #settingsPanel.open,
+body.solo-payload #converterPanel.open,
+body.solo-payload #payloadLibPanel.open {
+  z-index: 600 !important;
+}
+
+/* Backdrop visible in solo only when a companion modal is open (JS toggles .open) */
+body.solo-payload .vpanel-backdrop,
+body.solo-settings .vpanel-backdrop {
+  z-index: 550;
+}
+
+/* ===== Payload Tools dropdown ===== */
+.payload-tools-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.payload-tools-btn .payload-tools-caret {
+  display: inline-block;
+  margin-left: 2px;
+  transition: transform 0.18s ease;
+  opacity: 0.85;
+}
+.payload-tools-wrap.open .payload-tools-btn {
+  border-color: rgba(0, 229, 255, 0.55);
+  color: #00e5ff;
+  box-shadow: 0 0 10px rgba(0, 229, 255, 0.15);
+}
+.payload-tools-wrap.open .payload-tools-caret {
+  transform: rotate(180deg);
+}
+.payload-tools-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 180px;
+  padding: 6px;
+  background: var(--bg-elevated, #24242e);
+  border: 1px solid rgba(0, 229, 255, 0.22);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(0, 0, 0, 0.25);
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
+  pointer-events: none;
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.payload-tools-wrap.open .payload-tools-menu {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+.payload-tools-menu[hidden] {
+  display: none !important;
+}
+.payload-tools-wrap.open .payload-tools-menu[hidden] {
+  display: flex !important;
+}
+.payload-tools-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  color: var(--text-secondary, #c8c8d0);
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.payload-tools-item:hover,
+.payload-tools-item:focus-visible {
+  background: rgba(0, 229, 255, 0.1);
+  color: #e8fbff;
+  outline: none;
+}
+.payload-tools-item .pti-ico {
+  width: 1.25em;
+  text-align: center;
+  opacity: 0.9;
+  font-size: 13px;
+}
+.payload-tools-item .pti-label {
+  flex: 1;
+}
+
+/* Char table panel sits under payload lines; ensure it stacks cleanly */
+#payloadWorkbench #charTablePanel {
+  margin-bottom: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  background: var(--bg-secondary, #141418);
+  padding: 8px;
+}
+
+/* Same Payload chrome in main panel and new-tab: Tools menu everywhere.
+   Embed-row shortcuts are redundant — hide them. */
+.payload-embed-tool {
+  display: none !important;
+}
+
+/* Allow Tools dropdown to paint outside the payload panel */
+#payloadWorkbench.tools-open {
+  overflow: visible !important;
+}
+#payloadWorkbench.tools-open .vpanel-header,
+#payloadWorkbench.tools-open .vpanel-header-actions {
+  overflow: visible !important;
+  max-width: none;
+}
+#payloadWorkbench.tools-open .vpanel-body {
+  /* keep body scrollable; only header/menu need to escape */
+  overflow: auto;
+}
+
+/* ===== Solo panel mode — History ===== */
+body.solo-history .top-bar,
+body.solo-history .main-layout,
+body.solo-history .backend-offline-float {
+  display: none !important;
+}
+body.solo-history .vpanel:not(#historyPanel):not(#advFilterPanel):not(#settingsPanel) {
+  display: none !important;
+}
+body.solo-history {
+  overflow: hidden;
+  background: var(--bg-primary, #0e0e10);
+}
+body.solo-history #historyPanel {
+  position: fixed !important;
+  inset: 10px !important;
+  top: 10px !important;
+  left: 10px !important;
+  right: 10px !important;
+  bottom: 10px !important;
+  width: auto !important;
+  height: auto !important;
+  max-height: none !important;
+  max-width: none !important;
+  transform: none !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  z-index: 400;
+  display: flex !important;
+  flex-direction: column !important;
+}
+body.solo-history #historyPanel .resize-grip,
+body.solo-history #historyPinBtn,
+body.solo-history #historyPopoutBtn {
+  display: none !important;
+}
+body.solo-history #historyPanel .vpanel-body {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  max-height: none !important;
+}
+body.solo-history #historyPanel .vpanel-header {
+  cursor: default !important;
+}
+body.solo-history #advFilterPanel.open,
+body.solo-history #settingsPanel.open {
+  z-index: 600 !important;
+}
+
+/* Solo History must beat drawer-left.open:not(.pinned) !important rules */
+body.solo-history #historyPanel.drawer-left,
+body.solo-history #historyPanel.drawer-left.open,
+body.solo-history #historyPanel.drawer-left.open:not(.pinned) {
+  position: fixed !important;
+  inset: 10px !important;
+  top: 10px !important;
+  left: 10px !important;
+  right: 10px !important;
+  bottom: 10px !important;
+  width: auto !important;
+  height: auto !important;
+  max-height: none !important;
+  max-width: none !important;
+  transform: none !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  border-radius: 12px !important;
+  z-index: 400 !important;
+  display: flex !important;
+  flex-direction: column !important;
 }

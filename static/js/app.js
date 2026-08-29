@@ -504,7 +504,7 @@
           <code class="cheat-entry-name">${escapeHtml(item.name)}</code>
           <span class="cheat-entry-sum">${escapeHtml(item.summary || '')}</span>
         </div>
-        <button type="button" class="cheat-pin-mini${pinned ? ' on' : ''}" data-pin="${escapeHtml(item.id)}" title="Pin">${neonPin(pinned)}</button>
+        <button type="button" class="cheat-pin-mini${pinned ? ' on' : ''}" data-pin="${escapeHtml(item.id)}" title="Pin">${pinned ? 'Pinned' : 'Pin'}</button>
       </div>`;
     }
 
@@ -567,7 +567,7 @@
           <div class="cheat-detail-head">
             <button type="button" class="btn btn-sm btn-ghost" id="cheatDetailClose">← Back</button>
             <span class="cheat-db-tag tag-${db.tag}">${escapeHtml(db.name)}</span>
-            <button type="button" class="pin-btn${pinned ? ' active' : ''}" id="cheatDetailPin">${neonPin(pinned, { label: pinned ? 'Pinned' : 'Pin' })}</button>
+            <button type="button" class="pin-btn${pinned ? ' active' : ''}" id="cheatDetailPin">${pinned ? 'Pinned' : 'Pin'}</button>
           </div>
           <h3 class="cheat-detail-title"><code>${escapeHtml(item.name)}</code></h3>
           <div class="cheat-detail-sub">${escapeHtml(cat.title)} · ${escapeHtml(item.summary || '')}</div>
@@ -614,21 +614,11 @@
         .replace(/"/g, '&quot;');
     }
 
-    /** Neon pin icon (replaces 📌/📍 stickers project-wide) */
+    /** Plain text pin label only (no neon SVG / emoji). */
     function neonPin(on, opts) {
       opts = opts || {};
-      const cls = 'neon-pin' + (on ? ' is-on' : '') + (opts.className ? ' ' + opts.className : '');
-      const label = opts.label != null ? opts.label : '';
-      const svg = `<svg class="${cls}" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
-        <path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
-          d="M15.2 3.3l5.5 5.5-3.4 1-6.2 6.2-1.6-1.6 6.2-6.2 1-3.4z"/>
-        <path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"
-          d="M9.2 14.8L4.5 21"/>
-        <path fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"
-          d="M12.8 11.2l-3.2 3.2"/>
-      </svg>`;
-      if (label === '') return svg;
-      return `<span class="neon-pin-wrap">${svg}<span class="neon-pin-label">${label}</span></span>`;
+      if (opts.label != null && opts.label !== '') return opts.label;
+      return on ? 'Pinned' : 'Pin';
     }
 
 
@@ -4659,13 +4649,16 @@ img, video, canvas { opacity: 0.9; }
       el.style.top = '';
       el.style.left = '';
       el.style.right = '';
+      el.style.bottom = '';
       el.style.width = '';
       el.style.height = '';
+      el.style.maxHeight = '';
+      el.style.transform = '';
       el.style.zIndex = '';
       const pinBtn = PIN_BTN_SEL[name] ? $(PIN_BTN_SEL[name]) : null;
       if (pinBtn) {
         pinBtn.classList.remove('active');
-        pinBtn.innerHTML = neonPin(false, { label: 'Pin' });
+        pinBtn.textContent = 'Pin';
       }
       if (typeof updatePinTray === 'function') updatePinTray();
     }
@@ -4698,9 +4691,31 @@ img, video, canvas { opacity: 0.9; }
 
       panel.classList.add('open');
       activeVPanel = name;
+
+      // History drawer: clear leftover pinned geometry so the full-height drawer opens cleanly
+      if (name === 'history' && !panel.classList.contains('pinned')) {
+        panel.style.top = '';
+        panel.style.left = '';
+        panel.style.right = '';
+        panel.style.bottom = '';
+        panel.style.width = '';
+        panel.style.height = '';
+        panel.style.maxHeight = '';
+        panel.style.transform = '';
+      }
+
       // Raise z-index so the opened panel is on top of any stack underneath
       panelZCounter += 1;
-      panel.style.zIndex = String(panelZCounter);
+      let z = panelZCounter;
+      // Solo/pop-out tab: main panel is ~400; companions must stack above it
+      if (document.body.classList.contains('solo-panel')) {
+        const primary =
+          (document.body.classList.contains('solo-payload') && name === 'payload') ||
+          (document.body.classList.contains('solo-settings') && name === 'settings') ||
+          (document.body.classList.contains('solo-history') && name === 'history');
+        if (!primary) z = Math.max(z, 600 + (panelZCounter % 50));
+      }
+      panel.style.zIndex = String(z);
 
       const navBtn = document.querySelector(`.nav-tool[data-panel="${name}"]`);
       if (navBtn) navBtn.classList.add('active');
@@ -4840,7 +4855,7 @@ img, video, canvas { opacity: 0.9; }
       const pinBtn = PIN_BTN_SEL[name] ? $(PIN_BTN_SEL[name]) : null;
       if (pinBtn) {
         pinBtn.classList.toggle('active', !!on);
-        pinBtn.innerHTML = neonPin(!!on, { label: on ? 'Pinned' : 'Pin' });
+        pinBtn.textContent = on ? 'Pinned' : 'Pin';
       }
       if (on) {
         // Always ensure pinned geometry (drawers otherwise stay full-height)
@@ -6321,10 +6336,10 @@ img, video, canvas { opacity: 0.9; }
           cheatNav.detailId = null;
           cheatNav._ready = true;
         }
-        // Neon icons on static Pin buttons
+        // Ensure Pin buttons stay plain text
       ['payloadPinBtn','historyPinBtn','cheatPinBtn','proxyPinBtn','settingsPinBtn','toolsPinBtn','payloadLibPinBtn','converterPinBtn'].forEach((id) => {
         const b = document.getElementById(id);
-        if (b && typeof neonPin === 'function') b.innerHTML = neonPin(b.classList.contains('active'), { label: 'Pin' });
+        if (b) b.textContent = b.classList.contains('active') ? 'Pinned' : 'Pin';
       });
       renderCheatSheet();
       }
@@ -6380,7 +6395,7 @@ img, video, canvas { opacity: 0.9; }
               <span class="proxy-item-url" title="${escapeHtml(p.url)}">${escapeHtml(p.url)}</span>
               <div class="proxy-item-actions">
                 <button type="button" class="use-btn${isActive ? ' active' : ''}" data-act="use" title="Use for requests">${isActive ? 'Active' : 'Use'}</button>
-                <button type="button" class="pin-btn${p.pinned ? ' on' : ''}" data-act="pin" title="Pin">${neonPin(!!p.pinned)}</button>
+                <button type="button" class="pin-btn${p.pinned ? ' on' : ''}" data-act="pin" title="Pin">${p.pinned ? 'Pinned' : 'Pin'}</button>
                 <button type="button" data-act="ping" title="Ping">Ping</button>
                 <button type="button" class="del-btn" data-act="del" title="Remove">×</button>
               </div>
@@ -6856,6 +6871,291 @@ img, video, canvas { opacity: 0.9; }
       $('#payloadLibSearch')?.addEventListener('input', renderPayloadLibrary);
     }
 
+    // ===== Solo panel / Open in new browser tab =====
+    // ?panel=settings | ?panel=payload
+    // Sync via localStorage + `storage` event (simple, no BroadcastChannel).
+
+    const PAYLOAD_DRAFT_KEY = 'sqli-workbench-payload-draft';
+
+    function getSoloPanelName() {
+      try {
+        const q = new URLSearchParams(window.location.search);
+        const p = (q.get('panel') || '').trim().toLowerCase();
+        return p || null;
+      } catch {
+        return null;
+      }
+    }
+
+    const soloPanel = getSoloPanelName();
+    const isSoloSettings = soloPanel === 'settings';
+    const isSoloPayload = soloPanel === 'payload';
+    const isSoloHistory = soloPanel === 'history';
+
+    const SOLO_PANEL_META = {
+      settings: {
+        el: '#settingsPanel',
+        title: 'Settings — SQLlix',
+        bodyClass: 'solo-settings',
+        windowName: 'sqllix-settings',
+      },
+      payload: {
+        el: '#payloadWorkbench',
+        title: 'Payload — SQLlix',
+        bodyClass: 'solo-payload',
+        windowName: 'sqllix-payload',
+      },
+      history: {
+        el: '#historyPanel',
+        title: 'History — SQLlix',
+        bodyClass: 'solo-history',
+        windowName: 'sqllix-history',
+      },
+    };
+
+    /** Open panel in a real browser tab; close the in-page panel on the main tab. */
+    function openPanelInNewTab(name) {
+      const meta = SOLO_PANEL_META[name];
+      if (!meta) return;
+      if (soloPanel === name) {
+        showToast('Already in this tab', '');
+        return;
+      }
+      // Persist payload draft so the new tab picks it up immediately
+      if (name === 'payload' && payloadInput) {
+        try { localStorage.setItem(PAYLOAD_DRAFT_KEY, payloadInput.value || ''); } catch { /* ignore */ }
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.set('panel', name);
+      const w = window.open(url.toString(), meta.windowName);
+      if (!w) {
+        showToast('Pop-up blocked — allow pop-ups for this origin', '');
+        return;
+      }
+      try { w.focus(); } catch { /* ignore */ }
+      // Close the virtual panel on the main page
+      if (!soloPanel && typeof closeVPanel === 'function') {
+        closeVPanel(name);
+      }
+    }
+
+    function bindSoloCloseButton(panelEl) {
+      const closeBtn = panelEl && panelEl.querySelector('[data-close-panel]');
+      if (!closeBtn) return;
+      closeBtn.title = 'Close tab';
+      closeBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.close();
+        setTimeout(() => showToast('You can close this browser tab', ''), 100);
+      }, true);
+    }
+
+    function enterSoloPanelMode(name) {
+      const meta = SOLO_PANEL_META[name];
+      if (!meta) return;
+      document.body.classList.add('solo-panel', meta.bodyClass);
+      document.title = meta.title;
+
+      const panel = $(meta.el);
+      if (panel) {
+        panel.classList.add('open');
+        panel.classList.remove('pinned');
+        activeVPanel = name;
+        bindSoloCloseButton(panel);
+      }
+    }
+
+    function loadPayloadDraft() {
+      try {
+        const raw = localStorage.getItem(PAYLOAD_DRAFT_KEY);
+        if (raw == null) return;
+        if (payloadInput) payloadInput.value = raw;
+        if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
+      } catch { /* ignore */ }
+    }
+
+    function savePayloadDraft() {
+      try {
+        localStorage.setItem(PAYLOAD_DRAFT_KEY, payloadInput ? payloadInput.value : '');
+      } catch { /* ignore */ }
+    }
+
+    let _payloadDraftTimer = null;
+    function bindPayloadDraftSync() {
+      payloadInput?.addEventListener('input', () => {
+        clearTimeout(_payloadDraftTimer);
+        _payloadDraftTimer = setTimeout(savePayloadDraft, 200);
+      });
+    }
+
+    function bindPanelPopoutButtons() {
+      $('#settingsPopoutBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openPanelInNewTab('settings');
+      });
+      $('#payloadPopoutBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openPanelInNewTab('payload');
+      });
+      $('#historyPopoutBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openPanelInNewTab('history');
+      });
+    }
+
+    function setPayloadToolsOpen(open) {
+      const wrap = $('#payloadToolsWrap');
+      const menu = $('#payloadToolsMenu');
+      const btn = $('#payloadToolsBtn');
+      const panel = $('#payloadWorkbench');
+      if (!wrap || !menu || !btn) return;
+      if (open) {
+        // absolute under .payload-tools-wrap (position:relative).
+        // Do NOT use position:fixed: .vpanel.float-center has transform, so
+        // fixed is relative to the panel — menu was placed off-screen and
+        // clipped by overflow:hidden (solo worked because transform:none).
+        menu.hidden = false;
+        menu.style.position = 'absolute';
+        menu.style.top = 'calc(100% + 6px)';
+        menu.style.right = '0';
+        menu.style.left = 'auto';
+        menu.style.zIndex = '5000';
+        panel?.classList.add('tools-open');
+        requestAnimationFrame(() => wrap.classList.add('open'));
+        btn.setAttribute('aria-expanded', 'true');
+      } else {
+        wrap.classList.remove('open');
+        panel?.classList.remove('tools-open');
+        btn.setAttribute('aria-expanded', 'false');
+        setTimeout(() => {
+          if (!wrap.classList.contains('open')) menu.hidden = true;
+        }, 180);
+      }
+    }
+
+    function bindPayloadToolsMenu() {
+      const wrap = $('#payloadToolsWrap');
+      const btn = $('#payloadToolsBtn');
+      const menu = $('#payloadToolsMenu');
+      if (!wrap || !btn || !menu) return;
+
+      let openTimer = null;
+      let closeTimer = null;
+      const clearTimers = () => {
+        clearTimeout(openTimer);
+        clearTimeout(closeTimer);
+        openTimer = closeTimer = null;
+      };
+
+      const scheduleOpen = () => {
+        clearTimeout(closeTimer);
+        closeTimer = null;
+        if (wrap.classList.contains('open')) return;
+        clearTimeout(openTimer);
+        openTimer = setTimeout(() => setPayloadToolsOpen(true), 90);
+      };
+      const scheduleClose = () => {
+        clearTimeout(openTimer);
+        openTimer = null;
+        clearTimeout(closeTimer);
+        closeTimer = setTimeout(() => setPayloadToolsOpen(false), 220);
+      };
+
+      // Hover to open — no extra click needed to reach Converter etc.
+      wrap.addEventListener('mouseenter', scheduleOpen);
+      wrap.addEventListener('mouseleave', scheduleClose);
+      // Menu is position:fixed (outside wrap) — keep open while pointer is on it
+      menu.addEventListener('mouseenter', () => {
+        clearTimers();
+        setPayloadToolsOpen(true);
+      });
+      menu.addEventListener('mouseleave', scheduleClose);
+
+      // Click still toggles (touch / keyboard users)
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearTimers();
+        setPayloadToolsOpen(!wrap.classList.contains('open'));
+      });
+
+      // Choosing an item closes the menu (handlers on items still run)
+      menu.addEventListener('click', (e) => {
+        const item = e.target.closest('.payload-tools-item');
+        if (!item) return;
+        clearTimers();
+        setTimeout(() => setPayloadToolsOpen(false), 0);
+      });
+
+      document.addEventListener('click', (e) => {
+        if (!wrap.classList.contains('open')) return;
+        if (wrap.contains(e.target) || menu.contains(e.target)) return;
+        clearTimers();
+        setPayloadToolsOpen(false);
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && wrap.classList.contains('open')) {
+          clearTimers();
+          setPayloadToolsOpen(false);
+        }
+      });
+
+      // Main-panel shortcuts (Tools menu is solo/new-tab only)
+      $('#converterBtnEmbed')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof openConverter === 'function') openConverter();
+      });
+      $('#payloadLibraryBtnEmbed')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof openPayloadLibrary === 'function') openPayloadLibrary();
+      });
+      $('#charTableBtnEmbed')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const badge = $('#charTableBadge');
+        if (badge) badge.click();
+        else if (typeof renderCharTable === 'function') renderCharTable();
+      });
+    }
+
+    /** Live-sync shared data across browser tabs (same origin). */
+    function bindCrossTabSync() {
+      window.addEventListener('storage', (e) => {
+        if (!e.key) return;
+        if (e.key === HEADERS_LS_KEY) {
+          loadPersistedHeaders();
+          renderHeaders();
+        } else if (e.key === APPEAR_KEY) {
+          applyAppearance(loadAppearance());
+        } else if (e.key === NP_KEY) {
+          npConfig = loadNpConfig();
+          syncNpSettingsUI();
+          state.nightProtectMode = Math.max(0, Math.min(2, +npConfig.defaultMode || 0));
+          state.nightProtect = state.nightProtectMode > 0;
+          if (typeof syncNightProtectBtn === 'function') syncNightProtectBtn();
+        } else if (e.key === COOKIE_META_KEY) {
+          if ($('#cookieMgrOverlay')?.classList.contains('open')) {
+            openCookieManager();
+          }
+        } else if (e.key === PAYLOAD_DRAFT_KEY) {
+          if (payloadInput && e.newValue != null && payloadInput.value !== e.newValue) {
+            const start = payloadInput.selectionStart;
+            const end = payloadInput.selectionEnd;
+            payloadInput.value = e.newValue;
+            try {
+              const len = payloadInput.value.length;
+              payloadInput.setSelectionRange(Math.min(start, len), Math.min(end, len));
+            } catch { /* ignore */ }
+            if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
+          }
+        }
+      });
+    }
+
     // ===== Init =====
     function init() {
       startBackendHealthLoop();
@@ -6881,6 +7181,7 @@ img, video, canvas { opacity: 0.9; }
       renderHistory();
       urlInput.value = '';
       payloadInput.value = '';
+      loadPayloadDraft();
       refreshAttackPanel();
       // Show shortcut hints on nav buttons
       const hint = (id) => formatShortcut(shortcuts[id] || {});
@@ -6891,5 +7192,13 @@ img, video, canvas { opacity: 0.9; }
       setInterval(() => {
         if (state.history.length && !state.attack.active) renderHistory();
       }, 30000);
+
+      bindPanelPopoutButtons();
+      bindPayloadToolsMenu();
+      bindPayloadDraftSync();
+      bindCrossTabSync();
+      if (isSoloSettings) enterSoloPanelMode('settings');
+      if (isSoloPayload) enterSoloPanelMode('payload');
+      if (isSoloHistory) enterSoloPanelMode('history');
     }
     init();

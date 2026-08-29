@@ -227,8 +227,26 @@
     <div class="vpanel-header" id="payloadDragHandle">
       <h2>Payload Workbench</h2>
       <div class="vpanel-header-actions">
-        <button type="button" class="night-protect-btn" id="payloadHeadersBtn" title="Open request headers settings" style="padding:4px 8px;font-size:11px;">☰ Headers</button>
-        <button type="button" class="night-protect-btn" id="payloadLibraryBtn" title="Saved payloads" style="padding:4px 8px;font-size:11px;">◈ Saved</button>
+        <div class="payload-tools-wrap" id="payloadToolsWrap">
+          <button type="button" class="pin-btn payload-tools-btn" id="payloadToolsBtn" title="Tools — hover to open" aria-expanded="false" aria-haspopup="menu">
+            Tools <span class="payload-tools-caret">▾</span>
+          </button>
+          <div class="payload-tools-menu" id="payloadToolsMenu" role="menu" hidden>
+            <button type="button" class="payload-tools-item" id="payloadHeadersBtn" role="menuitem" title="Request headers">
+              <span class="pti-ico">☰</span><span class="pti-label">Headers</span>
+            </button>
+            <button type="button" class="payload-tools-item" id="payloadLibraryBtn" role="menuitem" title="Saved payloads">
+              <span class="pti-ico">◈</span><span class="pti-label">Saved library</span>
+            </button>
+            <button type="button" class="payload-tools-item" id="charTableBadge" role="menuitem" title="Character table">
+              <span class="pti-ico">⊞</span><span class="pti-label">Char tables</span>
+            </button>
+            <button type="button" class="payload-tools-item" id="converterBtn" role="menuitem" title="Encoder / decoder">
+              <span class="pti-ico">⇄</span><span class="pti-label">Converter</span>
+            </button>
+          </div>
+        </div>
+        <button type="button" class="pin-btn" id="payloadPopoutBtn" title="Open Payload in a new browser tab">↗</button>
         <button type="button" class="pin-btn" id="payloadPinBtn" title="Pin panel — keep open while working">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
@@ -334,9 +352,7 @@
       </div>
       <div class="payload-label-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 6px;">
         <span class="payload-label" style="margin:0;">Payload lines</span>
-        <div class="char-table-wrap" id="charTableWrap">
-          <button type="button" class="body-ct-badge" id="charTableBadge" title="Character table">Tables</button>
-        </div>
+        <div class="char-table-wrap" id="charTableWrap" hidden aria-hidden="true"></div>
       </div>
       <div class="char-table-panel hidden" id="charTablePanel">
         <div class="char-table-head">
@@ -356,7 +372,9 @@
       <div class="payload-actions">
         <button id="urlEncodeBtn" class="btn btn-sm" title="URL Encode (selection or each line)">URL Encode</button>
         <button id="urlDecodeBtn" class="btn btn-sm" title="URL Decode (selection or each line)">URL Decode</button>
-        <button id="converterBtn" class="btn btn-sm" title="Open converter" style="border-color:var(--accent-cyan);color:var(--accent-cyan);">Converter</button>
+        <button type="button" id="converterBtnEmbed" class="btn btn-sm payload-embed-tool" title="Open converter" style="border-color:var(--accent-cyan);color:var(--accent-cyan);">Converter</button>
+        <button type="button" id="payloadLibraryBtnEmbed" class="btn btn-sm payload-embed-tool" title="Saved payloads">Saved</button>
+        <button type="button" id="charTableBtnEmbed" class="btn btn-sm payload-embed-tool" title="Character table">Tables</button>
         <button id="clearPayloadBtn" class="btn btn-sm btn-ghost">Clear</button>
         <button id="injectBtn" class="btn btn-sm" style="margin-left:auto; border-color:var(--accent); color:var(--accent);">
           Inject into Target
@@ -415,6 +433,7 @@
     <div class="vpanel-header" id="historyDragHandle">
       <h2>Request History</h2>
       <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn" id="historyPopoutBtn" title="Open History in a new browser tab">↗</button>
         <button type="button" class="pin-btn" id="historyPinBtn" title="Pin panel — detach & resize">Pin</button>
         <button id="focusHistoryBtn" class="btn btn-sm btn-ghost hidden" title="Focus history">⛶</button>
         <button id="clearHistoryBtn" class="btn btn-sm btn-ghost" title="Clear unpinned history">Clear</button>
@@ -682,6 +701,7 @@
     <div class="vpanel-header" id="settingsDragHandle">
       <h2>Settings</h2>
       <div class="vpanel-header-actions">
+        <button type="button" class="pin-btn" id="settingsPopoutBtn" title="Open Settings in a new browser tab">↗ New tab</button>
         <button type="button" class="pin-btn" id="settingsPinBtn" title="Pin panel">Pin</button>
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
