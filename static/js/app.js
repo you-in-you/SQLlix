@@ -615,12 +615,6 @@
     }
 
     /** Plain text pin label only (no neon SVG / emoji). */
-    function neonPin(on, opts) {
-      opts = opts || {};
-      if (opts.label != null && opts.label !== '') return opts.label;
-      return on ? 'Pinned' : 'Pin';
-    }
-
 
     let toastTimer;
     function showToast(msg, type = '') {
@@ -628,60 +622,6 @@
       toastEl.className = 'toast show' + (type ? ' ' + type : '');
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2200);
-    }
-
-    // ===== Mock Response =====
-    function generateMockResponse(url, method, payload) {
-      const isError = Math.random() < 0.22;
-      const isTimeBased = /sleep|waitfor|pg_sleep|dbms_pipe/i.test(payload || '');
-      const delay = isTimeBased ? 4800 + Math.random() * 900 : 70 + Math.random() * 250;
-      const status = isError ? (Math.random() < 0.55 ? 500 : 400) : 200;
-
-      let body = '';
-      let contentType = 'text/html; charset=utf-8';
-
-      if (status === 500) {
-        body = `<!DOCTYPE html><html><head><title>500 Internal Server Error</title></head>
-<body style="font-family:system-ui;padding:40px;background:#1a1a1a;color:#eee">
-<h1 style="color:#ff5252">Internal Server Error</h1>
-<p>You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near <b style="color:#00e676">'${escapeHtml(payload || '')}'</b> at line 1</p>
-<pre style="background:#111;padding:16px;border-radius:6px;color:#ff8a80;overflow:auto">Warning: mysqli_query(): MySQL server has gone away in /var/www/html/page.php on line 42
-Fatal error: Uncaught mysqli_sql_exception...</pre>
-</body></html>`;
-      } else if (status === 400) {
-        body = `{"error":"Bad Request","message":"Invalid parameter","code":400}`;
-        contentType = 'application/json';
-      } else {
-        const dbHint = /union|database\(\)|version\(\)|@@version|current_database/i.test(payload || '')
-          ? `<div style="background:#0d1f0d;color:#00e676;padding:14px;font-family:monospace;margin:16px 0;border-radius:6px;border:1px solid #00c853">
-               <strong>DB:</strong> webapp_prod &nbsp;|&nbsp; <strong>Version:</strong> 8.0.36-MySQL<br>
-               <strong>User:</strong> app_user@localhost &nbsp;|&nbsp; <strong>Tables:</strong> users, sessions, products
-             </div>`
-          : '';
-        body = `<!DOCTYPE html><html><head><title>Target App</title>
-<style>body{font-family:system-ui;background:#f4f4f4;color:#222;margin:0;padding:40px}
-.card{background:#fff;border-radius:8px;padding:24px;max-width:640px;box-shadow:0 2px 12px rgba(0,0,0,.08)}
-h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;color:#2e7d32;padding:4px 10px;border-radius:4px;font-size:13px}</style>
-</head><body><div class="card"><h1>Welcome</h1>
-<p class="badge">Query executed successfully</p>
-<p>Processed: <code>${escapeHtml(url)}</code></p>${dbHint}
-<p style="color:#888;font-size:13px">Mocked response for offline UI demonstration.</p></div></body></html>`;
-      }
-
-      return {
-        status,
-        statusText: status === 200 ? 'OK' : status === 400 ? 'Bad Request' : 'Internal Server Error',
-        timeMs: Math.round(delay),
-        headers: {
-          'Content-Type': contentType,
-          'Server': 'Apache/2.4.57 (Ubuntu)',
-          'X-Powered-By': 'PHP/8.2.12',
-          'Set-Cookie': 'PHPSESSID=mock' + Math.random().toString(36).slice(2, 10) + '; path=/; HttpOnly',
-          'Content-Length': String(body.length),
-          'Date': new Date().toUTCString(),
-        },
-        body,
-      };
     }
 
     // ===== Headers UI =====
@@ -3734,17 +3674,6 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
     // Body CT mode: 'auto' | mime string | 'custom'
     let bodyCtMode = 'auto';
 
-    function getBodyCtChoice() {
-      if (bodyCtMode === 'custom') {
-        return ($('#bodyCtCustom')?.value || '').trim() || 'text/plain';
-      }
-      if (bodyCtMode === 'auto') {
-        const body = postBodyInput ? postBodyInput.value : '';
-        return detectBodyContentType(body).mime;
-      }
-      return bodyCtMode;
-    }
-
     function updateBodyCtUI() {
       const wrap = $('#bodyCtWrap');
       const badge = $('#bodyCtBadge');
@@ -4209,10 +4138,6 @@ h1{margin-top:0;color:#1a1a2e}.badge{display:inline-block;background:#e8f5e9;col
         });
       }
       return out;
-    }
-
-    function responseHasSetCookie(resp) {
-      return getSetCookiesFromHeaders(resp && resp.headers).length > 0;
     }
 
     /** Merge selected cookie pairs into request Cookie header */
@@ -5313,7 +5238,7 @@ img, video, canvas { opacity: 0.9; }
       }
       const shelved = el.classList.contains('shelved');
       btn.classList.toggle('is-shelved', shelved);
-      btn.textContent = shelved ? '↑' : '↓';
+      btn.textContent = shelved ? '↗' : '↙';
       btn.title = shelved
         ? 'Restore this panel from tray'
         : 'Minimize this panel to tray (per-panel shelf)';
@@ -5338,10 +5263,6 @@ img, video, canvas { opacity: 0.9; }
     }
     function isPayloadPinnedOpen() { return isPanelPinnedOpen('payload'); }
     function isHistoryPinnedOpen() { return isPanelPinnedOpen('history'); }
-
-    function anyPinnedOpen() {
-      return [...PINNABLE].some((n) => isPanelPinnedOpen(n));
-    }
 
     /** Raise any open panel above others (Windows-style window focus) */
     function focusPanel(name) {
@@ -5374,7 +5295,7 @@ img, video, canvas { opacity: 0.9; }
       const pinBtn = PIN_BTN_SEL[name] ? $(PIN_BTN_SEL[name]) : null;
       if (pinBtn) {
         pinBtn.classList.remove('active');
-        pinBtn.textContent = 'Pin';
+        pinBtn.textContent = pinBtn.classList.contains('vpanel-action-btn') ? '⊙' : 'Pin';
       }
       if (typeof updateShelfBtn === 'function') updateShelfBtn(name);
       if (typeof updatePinTray === 'function') updatePinTray();
@@ -5572,7 +5493,11 @@ img, video, canvas { opacity: 0.9; }
       const pinBtn = PIN_BTN_SEL[name] ? $(PIN_BTN_SEL[name]) : null;
       if (pinBtn) {
         pinBtn.classList.toggle('active', !!on);
-        pinBtn.textContent = on ? 'Pinned' : 'Pin';
+        if (pinBtn.classList.contains('vpanel-action-btn')) {
+          pinBtn.textContent = '⊙';
+        } else {
+          pinBtn.textContent = on ? 'Pinned' : 'Pin';
+        }
       }
       if (on) {
         // Pinned windows stay open (otherwise ↓ never appears)
@@ -5622,8 +5547,6 @@ img, video, canvas { opacity: 0.9; }
       'payload-lib': 'Saved',
       converter: 'Converter',
     };
-    let pinShelfAll = false; // last Alt+I direction
-
     function getPinnedPanelNames() {
       return [...PINNABLE].filter((name) => {
         const el = $(VPANEL_MAP[name]);
@@ -5869,10 +5792,6 @@ img, video, canvas { opacity: 0.9; }
     });
 
     // Keep legacy names used elsewhere
-    function setPayloadPinned(on) {
-      setPanelPinned('payload', on, PIN_DEFAULTS.payload);
-    }
-
     // ===== Keyboard Shortcuts System =====
     // Use Ctrl+Alt / function keys to avoid browser conflicts (Ctrl+P print, Ctrl+H history, Ctrl+F find, …)
     const SHORTCUTS_KEY = 'sqli-workbench-shortcuts-v2';
@@ -9299,4 +9218,20 @@ img, video, canvas { opacity: 0.9; }
       // Solo mode hides top-bar — re-sync so drawers/full panels use correct offset
       syncTopbarHeight();
     }
+    // Close-cluster: after action click, collapse until mouse leaves
+    (function bindCloseClusterForceClose() {
+      document.addEventListener('click', (e) => {
+        const btn = e.target && e.target.closest && e.target.closest('.vpanel-close-cluster .vpanel-action-btn');
+        if (!btn) return;
+        const cluster = btn.closest('.vpanel-close-cluster');
+        if (!cluster) return;
+        cluster.classList.add('force-closed');
+        const unlock = () => {
+          cluster.classList.remove('force-closed');
+          cluster.removeEventListener('mouseleave', unlock);
+        };
+        cluster.addEventListener('mouseleave', unlock);
+      }, true);
+    })();
+
     init();

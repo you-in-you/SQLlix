@@ -246,10 +246,18 @@
             </button>
           </div>
         </div>
-        <button type="button" class="pin-btn" id="payloadPopoutBtn" title="Open Payload in a new browser tab">↗</button>
-        <button type="button" class="pin-btn shelf-btn" id="payloadShelfBtn" title="Minimize / restore this panel (shelf) — same as tray / per-panel Alt+I" hidden>↓</button>
-        <button type="button" class="pin-btn" id="payloadPinBtn" title="Pin panel — keep open while working">Pin</button>
-        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+        <div class="vpanel-close-cluster" title="Hover for more actions">
+          <div class="vpanel-close-tray">
+            <div class="vpanel-close-extras">
+              <div class="vpanel-close-extras-inner">
+                <button type="button" class="pin-btn vpanel-action-btn" id="payloadPinBtn" title="Pin panel">⊙</button>
+                <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="payloadShelfBtn" title="Minimize to tray" hidden>↙</button>
+                <button type="button" class="pin-btn vpanel-action-btn" id="payloadPopoutBtn" title="Open in new tab">↗</button>
+              </div>
+            </div>
+            <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="vpanel-body" style="padding:12px 14px;">
@@ -349,12 +357,20 @@
     <div class="vpanel-header" id="historyDragHandle">
       <h2>Request History</h2>
       <div class="vpanel-header-actions">
-        <button type="button" class="pin-btn" id="historyPopoutBtn" title="Open History in a new browser tab">↗</button>
-        <button type="button" class="pin-btn shelf-btn" id="historyShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
-        <button type="button" class="pin-btn" id="historyPinBtn" title="Pin panel — detach & resize">Pin</button>
         <button id="focusHistoryBtn" class="btn btn-sm btn-ghost hidden" title="Focus history">⛶</button>
         <button id="clearHistoryBtn" class="btn btn-sm btn-ghost" title="Clear unpinned history">Clear</button>
-        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+        <div class="vpanel-close-cluster" title="Hover for more actions">
+          <div class="vpanel-close-tray">
+            <div class="vpanel-close-extras">
+              <div class="vpanel-close-extras-inner">
+              <button type="button" class="pin-btn vpanel-action-btn" id="historyPinBtn" title="Pin panel">⊙</button>
+              <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="historyShelfBtn" title="Minimize to tray" hidden>↙</button>
+              <button type="button" class="pin-btn vpanel-action-btn" id="historyPopoutBtn" title="Open in new tab">↗</button>
+              </div>
+            </div>
+            <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="vpanel-body panel-body" style="position:relative;">
@@ -423,9 +439,17 @@
     <div class="vpanel-header" id="toolsDragHandle">
       <h2>Tools</h2>
       <div class="vpanel-header-actions">
-        <button type="button" class="pin-btn shelf-btn" id="toolsShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
-        <button type="button" class="pin-btn" id="toolsPinBtn" title="Pin panel">Pin</button>
-        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+        <div class="vpanel-close-cluster" title="Hover for more actions">
+          <div class="vpanel-close-tray">
+            <div class="vpanel-close-extras">
+              <div class="vpanel-close-extras-inner">
+              <button type="button" class="pin-btn vpanel-action-btn" id="toolsPinBtn" title="Pin panel">⊙</button>
+              <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="toolsShelfBtn" title="Minimize to tray" hidden>↙</button>
+              </div>
+            </div>
+            <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="vpanel-body panel-body">
@@ -473,9 +497,17 @@
     <div class="vpanel-header" id="cheatDragHandle">
       <h2>Cheat Sheet</h2>
       <div class="vpanel-header-actions">
-        <button type="button" class="pin-btn shelf-btn" id="cheatShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
-        <button type="button" class="pin-btn" id="cheatPinBtn" title="Pin panel">Pin</button>
-        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+        <div class="vpanel-close-cluster" title="Hover for more actions">
+          <div class="vpanel-close-tray">
+            <div class="vpanel-close-extras">
+              <div class="vpanel-close-extras-inner">
+              <button type="button" class="pin-btn vpanel-action-btn" id="cheatPinBtn" title="Pin panel">⊙</button>
+              <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="cheatShelfBtn" title="Minimize to tray" hidden>↙</button>
+              </div>
+            </div>
+            <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="vpanel-body">
@@ -496,9 +528,17 @@
     <div class="vpanel-header" id="proxyDragHandle">
       <h2>Proxy</h2>
       <div class="vpanel-header-actions">
-        <button type="button" class="pin-btn shelf-btn" id="proxyShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
-        <button type="button" class="pin-btn" id="proxyPinBtn" title="Pin panel">Pin</button>
-        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+        <div class="vpanel-close-cluster" title="Hover for more actions">
+          <div class="vpanel-close-tray">
+            <div class="vpanel-close-extras">
+              <div class="vpanel-close-extras-inner">
+              <button type="button" class="pin-btn vpanel-action-btn" id="proxyPinBtn" title="Pin panel">⊙</button>
+              <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="proxyShelfBtn" title="Minimize to tray" hidden>↙</button>
+              </div>
+            </div>
+            <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="vpanel-body" style="padding:12px 14px;">
@@ -541,9 +581,17 @@
     <div class="vpanel-header" id="converterDragHandle">
       <h2>Converter</h2>
       <div class="vpanel-header-actions">
-        <button type="button" class="pin-btn shelf-btn" id="converterShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
-        <button type="button" class="pin-btn" id="converterPinBtn" title="Pin panel">Pin</button>
-        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+        <div class="vpanel-close-cluster" title="Hover for more actions">
+          <div class="vpanel-close-tray">
+            <div class="vpanel-close-extras">
+              <div class="vpanel-close-extras-inner">
+              <button type="button" class="pin-btn vpanel-action-btn" id="converterPinBtn" title="Pin panel">⊙</button>
+              <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="converterShelfBtn" title="Minimize to tray" hidden>↙</button>
+              </div>
+            </div>
+            <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="vpanel-body" style="padding:12px;display:flex;flex-direction:column;gap:10px;min-height:0;overflow:hidden;">
@@ -596,9 +644,17 @@
     <div class="vpanel-header" id="payloadLibDragHandle">
       <h2>Saved Payloads</h2>
       <div class="vpanel-header-actions">
-        <button type="button" class="pin-btn shelf-btn" id="payloadLibShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
-        <button type="button" class="pin-btn" id="payloadLibPinBtn" title="Pin panel">Pin</button>
-        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+        <div class="vpanel-close-cluster" title="Hover for more actions">
+          <div class="vpanel-close-tray">
+            <div class="vpanel-close-extras">
+              <div class="vpanel-close-extras-inner">
+              <button type="button" class="pin-btn vpanel-action-btn" id="payloadLibPinBtn" title="Pin panel">⊙</button>
+              <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="payloadLibShelfBtn" title="Minimize to tray" hidden>↙</button>
+              </div>
+            </div>
+            <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="vpanel-body panel-body" style="padding:0;display:flex;flex-direction:column;min-height:0;">
@@ -623,10 +679,18 @@
     <div class="vpanel-header" id="settingsDragHandle">
       <h2>Settings</h2>
       <div class="vpanel-header-actions">
-        <button type="button" class="pin-btn" id="settingsPopoutBtn" title="Open Settings in a new browser tab">↗ New tab</button>
-        <button type="button" class="pin-btn shelf-btn" id="settingsShelfBtn" title="Minimize / restore this panel (shelf)" hidden>↓</button>
-        <button type="button" class="pin-btn" id="settingsPinBtn" title="Pin panel">Pin</button>
-        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+        <div class="vpanel-close-cluster" title="Hover for more actions">
+          <div class="vpanel-close-tray">
+            <div class="vpanel-close-extras">
+              <div class="vpanel-close-extras-inner">
+              <button type="button" class="pin-btn vpanel-action-btn" id="settingsPinBtn" title="Pin panel">⊙</button>
+              <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="settingsShelfBtn" title="Minimize to tray" hidden>↙</button>
+              <button type="button" class="pin-btn vpanel-action-btn" id="settingsPopoutBtn" title="Open in new tab">↗</button>
+              </div>
+            </div>
+            <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+          </div>
+        </div>
       </div>
     </div>
     <div class="settings-tabs" id="settingsTabs">
