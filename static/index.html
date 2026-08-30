@@ -850,104 +850,193 @@
     <div class="resize-grip e" data-resize="e"></div>
     <div class="resize-grip w" data-resize="w"></div>
     <div class="vpanel-header" id="attackConfigDragHandle">
-      <h2>Attack Config</h2>
+      <h2>Attack — Loop order</h2>
       <div class="vpanel-header-actions">
         <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
       </div>
     </div>
-    <div class="vpanel-body attack-config-panel" style="padding:0;">
-        <div class="attack-config-header" id="attackConfigHeader" title="Click to minimize / expand">
-          <span class="attack-badge">⚡ SQLi ATK Mode</span>
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span id="attackExpandCount" class="attack-expand-count">0 payloads</span>
-            <button type="button" class="atk-min-btn" id="atkMinBtn" title="Minimize">▾</button>
+    <div class="vpanel-body attack-config-panel" style="padding:0;display:flex;flex-direction:column;min-height:0;">
+      <p class="atk-mode-hint" id="atkModeHint">Drag to set priority — <strong>top = outermost loop</strong>. Each $ has its own Scope and Stop.</p>
+      <div id="atkDollarSlots" class="atk-dollar-slots"></div>
+      <div class="attack-config-grid atk-global-grid">
+        <label class="attack-field">
+          <span>Delay (ms)</span>
+          <input type="number" id="atkDelay" min="0" max="60000" value="200" step="50" />
+        </label>
+        <label class="attack-field">
+          <span>Timeout (s)</span>
+          <input type="number" id="atkTimeout" min="1" max="120" value="15" />
+        </label>
+        <label class="attack-field">
+          <span>Threads</span>
+          <input type="number" id="atkThreads" min="1" max="50" value="1" title="Dollar mode runs sequential nested loops; threads apply to brace mode" />
+        </label>
+      </div>
+      <div class="atk-footer-bar">
+        <span id="attackExpandCount" class="attack-expand-count">0</span>
+        <button type="button" class="btn btn-sm" id="atkCombosOpenBtn" title="View / search / edit all combinations">Combos</button>
+        <span id="atkStopSummary" class="atk-stop-summary" style="display:none;">—</span>
+      </div>
+      <div id="attackPreview" class="attack-preview" hidden></div>
+      <!-- keep legacy stop overlay ids for brace mode / shared helpers -->
+      <div class="atk-stop-overlay" id="atkStopOverlay" hidden>
+        <div class="atk-stop-overlay-head">
+          <strong>Stop conditions</strong>
+          <button type="button" class="btn btn-sm btn-ghost" id="atkStopClose">✕</button>
+        </div>
+        <div class="atk-stop-overlay-body">
+          <div class="atk-stop-grid">
+            <label class="atk-stop-row atk-stop-wide">
+              <input type="checkbox" id="atkCondBody" /> Body regex
+              <input type="text" id="atkCondBodyVal" class="atk-stop-input" placeholder="welcome  or  !error" />
+            </label>
+            <label class="atk-stop-row atk-stop-wide">
+              <input type="checkbox" id="atkCondUrl" /> URL regex
+              <input type="text" id="atkCondUrlVal" class="atk-stop-input" placeholder="id=" />
+            </label>
+            <label class="atk-stop-row atk-stop-wide">
+              <input type="checkbox" id="atkCondTime" /> Time ≥ ms
+              <input type="number" id="atkCondTimeVal" class="atk-stop-input" min="0" placeholder="5000" />
+            </label>
+            <label class="atk-stop-row atk-stop-wide">
+              <input type="checkbox" id="atkCondSize" /> Body size
+              <select id="atkCondSizeOp" class="atk-stop-input" style="flex:0;min-width:70px;">
+                <option value="gt">≥</option>
+                <option value="lt">≤</option>
+                <option value="eq">=</option>
+              </select>
+              <input type="number" id="atkCondSizeVal" class="atk-stop-input" min="0" placeholder="bytes" />
+            </label>
+            <label class="atk-stop-row atk-stop-wide">
+              <input type="checkbox" id="atkCondSizeDiff" /> Body size Δ vs first ≥
+              <input type="number" id="atkCondSizeDiffVal" class="atk-stop-input" min="0" placeholder="50" value="50" />
+            </label>
+            <label class="atk-stop-row">
+              <span style="font-size:10px;color:var(--text-muted);">Match ×</span>
+              <input type="number" id="atkMatchTimes" min="1" max="100" value="1" class="atk-stop-input" />
+            </label>
+            <input type="hidden" id="atkMatchAction" value="advance" />
+            <button type="button" id="atkStopOpenBtn" hidden></button>
           </div>
         </div>
-        <div class="attack-config-grid">
-          <label class="attack-field">
-            <span>Threads</span>
-            <input type="number" id="atkThreads" min="1" max="50" value="3" />
-          </label>
-          <label class="attack-field">
-            <span>Delay (ms)</span>
-            <input type="number" id="atkDelay" min="0" max="60000" value="200" step="50" />
-          </label>
-          <label class="attack-field">
-            <span>Timeout (s)</span>
-            <input type="number" id="atkTimeout" min="1" max="120" value="15" />
-          </label>
-          <label class="attack-field">
-            <span>On match</span>
-            <select id="atkMatchAction">
-              <option value="pause" selected>Pause</option>
-              <option value="stop">Stop</option>
-            </select>
-          </label>
-          <label class="attack-field">
-            <span>Match ×</span>
-            <input type="number" id="atkMatchTimes" min="1" max="100" value="1" title="How many times condition must match" />
-          </label>
+        <div class="atk-stop-overlay-foot">
+          <button type="button" class="btn btn-sm btn-ghost" id="atkStopClear">Clear all</button>
+          <button type="button" class="btn btn-sm btn-primary" id="atkStopDone">Done</button>
         </div>
-        <div class="atk-stop-bar">
-          <button type="button" class="btn btn-sm" id="atkStopOpenBtn" style="border-color:rgba(255,217,61,0.45);color:#ffd93d;">⚙ Stop conditions</button>
-          <span class="atk-stop-summary" id="atkStopSummary">No conditions · never auto-pause</span>
-        </div>
-        <!-- Stop conditions overlay (history-filter style) -->
-        <div class="atk-stop-overlay" id="atkStopOverlay">
-          <div class="atk-stop-overlay-head">
-            <strong>Stop / Pause conditions</strong>
-            <button type="button" class="btn btn-sm btn-ghost" id="atkStopClose">✕</button>
-          </div>
-          <div class="atk-stop-overlay-body">
-            <p class="atk-stop-hint">All enabled checks are <b>AND</b>. Regex fields support <code>!pattern</code> to invert (must NOT match). Pure regex alternative: <code>^(?!.*word).*$</code></p>
-            <div class="atk-stop-grid">
-              <label class="atk-stop-row"><input type="checkbox" id="atkCond2xx" /> Status 2xx</label>
-              <label class="atk-stop-row"><input type="checkbox" id="atkCond3xx" /> Status 3xx</label>
-              <label class="atk-stop-row"><input type="checkbox" id="atkCond4xx" /> Status 4xx</label>
-              <label class="atk-stop-row"><input type="checkbox" id="atkCond5xx" /> Status 5xx</label>
-              <label class="atk-stop-row"><input type="checkbox" id="atkCond0" /> Network error (0)</label>
-              <label class="atk-stop-row"><input type="checkbox" id="atkCondSql" /> SQL error signatures</label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondStatus" /> Status codes
-                <input type="text" id="atkCondStatusVal" class="atk-stop-input" placeholder="200,500 or 200-299" />
-              </label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondBody" /> Body regex
-                <input type="text" id="atkCondBodyVal" class="atk-stop-input" placeholder="mysql|syntax  or  !welcome" title="Prefix ! to invert" />
-              </label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondUrl" /> URL regex
-                <input type="text" id="atkCondUrlVal" class="atk-stop-input" placeholder="id=  or  !logout" title="Prefix ! to invert" />
-              </label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondTime" /> Time ≥ ms
-                <input type="number" id="atkCondTimeVal" class="atk-stop-input" min="0" placeholder="5000" />
-              </label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondSize" /> Body size
-                <select id="atkCondSizeOp" class="atk-stop-input" style="flex:0;min-width:70px;">
-                  <option value="gt">≥</option>
-                  <option value="lt">≤</option>
-                  <option value="eq">=</option>
-                </select>
-                <input type="number" id="atkCondSizeVal" class="atk-stop-input" min="0" placeholder="bytes" />
-              </label>
-              <label class="atk-stop-row atk-stop-wide">
-                <input type="checkbox" id="atkCondSizeDiff" /> Body size Δ vs first ≥
-                <input type="number" id="atkCondSizeDiffVal" class="atk-stop-input" min="0" placeholder="50" value="50" />
-              </label>
-            </div>
-          </div>
-          <div class="atk-stop-overlay-foot">
-            <button type="button" class="btn btn-sm btn-ghost" id="atkStopClear">Clear all</button>
-            <button type="button" class="btn btn-sm btn-primary" id="atkStopDone">Done</button>
-          </div>
-        </div>
-        <div id="attackPreview" class="attack-preview"></div>
-      
+      </div>
     </div>
   </div>
 
+  <!-- Per-$ Scope editor (brace-style ranges) -->
+  <div class="vpanel float-center attack-scope-vpanel" id="attackScopePanel" data-panel="attack-scope">
+    <div class="vpanel-header">
+      <h2 id="attackScopeTitle">$1 Scope</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body" style="padding:12px 14px;display:flex;flex-direction:column;gap:12px;min-height:0;overflow:auto;">
+      <p class="atk-mode-hint" style="padding:0;">Build the value list in order. Segments are <strong>concatenated</strong> (not multiplied).</p>
+      <div class="atk-scope-examples">
+        <code>{1..30}</code> numbers ·
+        <code>{a..z}</code> / <code>{A..F}</code> chars ·
+        <code>{#..#}</code> specials ·
+        <code>{admin,root}</code> list
+      </div>
+      <div id="atkScopeSegments" class="atk-scope-segments"></div>
+      <div class="atk-scope-add-row">
+        <button type="button" class="btn btn-sm" id="atkScopeAddRange" title="Numeric or letter range">+ Range {n..m}</button>
+        <button type="button" class="btn btn-sm" id="atkScopeAddSpecials" title="Special characters">+ {#..#}</button>
+        <button type="button" class="btn btn-sm" id="atkScopeAddList" title="Comma-separated values">+ List</button>
+      </div>
+      <label class="atk-slot-custom">Expression <span style="font-weight:400;text-transform:none;letter-spacing:0;">(type &amp; parse — needs {…} braces)</span>
+        <input type="text" id="atkScopeExpr" class="atk-slot-custom-input" placeholder="{1..15}{#..#}{a..F}{admin,root}" spellcheck="false" />
+      </label>
+      <button type="button" class="btn btn-sm btn-primary" id="atkScopeParseExpr">Parse expression → segments</button>
+      <div class="atk-scope-preview-head">
+        <span>Preview</span>
+        <span id="atkScopePreviewCount" class="atk-slot-count">0</span>
+      </div>
+      <div id="atkScopePreview" class="atk-scope-preview"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button type="button" class="btn btn-sm btn-ghost" data-close-panel>Cancel</button>
+        <button type="button" class="btn btn-sm btn-primary" id="atkScopeSaveBtn">Save scope</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Per-$ Stop conditions -->
+  <div class="vpanel float-center attack-scope-vpanel" id="attackSlotStopPanel" data-panel="attack-slot-stop">
+    <div class="vpanel-header">
+      <h2 id="attackSlotStopTitle">$1 Stop</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body" style="padding:12px 14px;display:flex;flex-direction:column;gap:10px;">
+      <p class="atk-mode-hint" style="padding:0;">When this condition matches, <strong>only this loop</strong> advances (inner finishes → outer +1). Attack continues.</p>
+      <label class="atk-stop-row atk-stop-wide">
+        <input type="checkbox" id="slotStopBody" /> Body regex
+        <input type="text" id="slotStopBodyVal" class="atk-stop-input" placeholder="welcome  or  !error" />
+      </label>
+      <label class="atk-stop-row atk-stop-wide">
+        <input type="checkbox" id="slotStopUrl" /> URL regex
+        <input type="text" id="slotStopUrlVal" class="atk-stop-input" placeholder="success" />
+      </label>
+      <label class="atk-stop-row atk-stop-wide">
+        <input type="checkbox" id="slotStopTime" /> Time ≥ ms
+        <input type="number" id="slotStopTimeVal" class="atk-stop-input" min="0" placeholder="5000" />
+      </label>
+      <label class="atk-stop-row atk-stop-wide">
+        <input type="checkbox" id="slotStopStatus" /> Status code
+        <input type="text" id="slotStopStatusVal" class="atk-stop-input" placeholder="200  or  200,302  or  !404" title="Comma list; prefix ! to invert" />
+      </label>
+      <label class="atk-stop-row atk-stop-wide">
+        <input type="checkbox" id="slotStopSize" /> Body size
+        <select id="slotStopSizeOp" class="atk-stop-input" style="flex:0;min-width:70px;">
+          <option value="gt">≥</option>
+          <option value="lt">≤</option>
+          <option value="eq">=</option>
+        </select>
+        <input type="number" id="slotStopSizeVal" class="atk-stop-input" min="0" placeholder="bytes" />
+      </label>
+      <label class="atk-stop-row atk-stop-wide">
+        <input type="checkbox" id="slotStopSizeDiff" /> Body Δ vs first ≥
+        <input type="number" id="slotStopSizeDiffVal" class="atk-stop-input" min="0" placeholder="50" value="50" />
+      </label>
+      <label class="atk-stop-row atk-stop-wide">
+        <input type="checkbox" id="slotStopHeader" /> Header regex
+        <input type="text" id="slotStopHeaderVal" class="atk-stop-input" placeholder="set-cookie:.*session|!server: nginx" />
+      </label>
+      <label class="atk-stop-row atk-stop-wide">
+        <input type="checkbox" id="slotStopTitle" /> Title / &lt;title&gt;
+        <input type="text" id="slotStopTitleVal" class="atk-stop-input" placeholder="Welcome|Dashboard" />
+      </label>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+        <button type="button" class="btn btn-sm btn-ghost" id="slotStopClear">Clear</button>
+        <button type="button" class="btn btn-sm btn-primary" id="slotStopSaveBtn">Save stop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Attack combinations viewer -->
+  <div class="vpanel float-center attack-scope-vpanel" id="attackCombosPanel" data-panel="attack-combos">
+    <div class="vpanel-header">
+      <h2>Combinations</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body" style="padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-height:0;overflow:hidden;">
+      <div class="atk-combos-toolbar">
+        <input type="search" id="atkCombosSearch" class="atk-slot-custom-input" placeholder="Search values / payload…" spellcheck="false" style="flex:1;" />
+        <button type="button" class="btn btn-sm btn-ghost" id="atkCombosReset" title="Rebuild from scopes">Reset</button>
+        <span id="atkCombosCount" class="atk-slot-count">0</span>
+      </div>
+      <div id="atkCombosList" class="atk-combos-list"></div>
+      <p class="atk-mode-hint" style="padding:0;">Edits apply to the attack queue. Reset rebuilds from current Scope order.</p>
+    </div>
+  </div>
 
   <!-- History Response viewer (solo History tab only — opens from per-record button) -->
   <div class="vpanel float-center hist-response-vpanel" id="histResponsePanel" data-panel="hist-response">

@@ -5266,6 +5266,9 @@ img, video, canvas { opacity: 0.9; }
       'hist-response': '#histResponsePanel',
       'cookie-bulk-import': '#cookieBulkImportPanel',
       'cookie-bulk-export': '#cookieBulkExportPanel',
+      'attack-scope': '#attackScopePanel',
+      'attack-slot-stop': '#attackSlotStopPanel',
+      'attack-combos': '#attackCombosPanel',
     };
     const PINNABLE = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib', 'converter']);
     const PIN_BTN_SEL = {
@@ -5384,7 +5387,7 @@ img, video, canvas { opacity: 0.9; }
       if (!panel) return;
 
       // Pin = never auto-close. Work panels stack (don't kill each other).
-      const MODALS = new Set(['settings', 'adv-filter', 'attack-dialog', 'attack-config', 'hist-response', 'cookie-bulk-import', 'cookie-bulk-export']);
+      const MODALS = new Set(['settings', 'adv-filter', 'attack-dialog', 'attack-config', 'hist-response', 'cookie-bulk-import', 'cookie-bulk-export', 'attack-scope', 'attack-slot-stop', 'attack-combos']);
       const WORK = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'tools', 'payload-lib', 'converter']);
 
       Object.keys(VPANEL_MAP).forEach((k) => {
@@ -6428,10 +6431,746 @@ img, video, canvas { opacity: 0.9; }
       return out;
     }
 
+    /** $1, $2, … slots inside the payload textarea (nested variable attack). */
+    function applyDollarMap(str, map) {
+      if (!str) return str || '';
+      map = map || {};
+      return String(str).replace(/\$(\d+)/g, (full, num) => {
+        const n = parseInt(num, 10);
+        return Object.prototype.hasOwnProperty.call(map, n) ? String(map[n]) : full;
+      });
+    }
+
+    function detectDollarSlots() {
+      const text = (payloadInput && payloadInput.value) || '';
+      const found = new Set();
+      const re = /\$(\d+)/g;
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        const n = parseInt(m[1], 10);
+        if (n >= 1 && n <= 20) found.add(n);
+      }
+      return [...found].sort((a, b) => a - b);
+    }
+
+    const ATK_SPECIALS = "!@#$%^&*()-_=+[]{}|;:'\",.<>/?`~ \\";
+
+    if (!state.attackSlotConfig) {
+      state.attackSlotConfig = { order: [], slots: {} };
+    }
+
+    function ensureAttackSlotState(detectedSlots) {
+      const cfg = state.attackSlotConfig;
+      if (!cfg.slots) cfg.slots = {};
+      if (!Array.isArray(cfg.order)) cfg.order = [];
+      const detected = (detectedSlots || []).map((n) => +n).filter((n) => n >= 1);
+      // Normalize prior order to numbers and drop removed slots
+      cfg.order = cfg.order.map((n) => +n).filter((n) => detected.includes(n));
+      detected.forEach((n) => {
+        if (!cfg.order.includes(n)) cfg.order.push(n);
+        if (!cfg.slots[n]) {
+          cfg.slots[n] = {
+            segments: [{ type: 'range', from: '1', to: '10' }],
+            stop: null,
+          };
+        }
+      });
+      Object.keys(cfg.slots).forEach((k) => {
+        if (!detected.includes(+k)) delete cfg.slots[k];
+      });
+      return cfg;
+    }
+
+    function expandRangeBounds(from, to) {
+      const a = String(from ?? '').trim();
+      const b = String(to ?? '').trim();
+      if (!a || !b) return [];
+      // numeric
+      if (/^-?\d+$/.test(a) && /^-?\d+$/.test(b)) {
+        const s = parseInt(a, 10);
+        const e = parseInt(b, 10);
+        const pad = (a[0] === '0' || b[0] === '0') ? Math.max(a.length, b.length) : 0;
+        const out = [];
+        const step = s <= e ? 1 : -1;
+        const limit = 10000;
+        let n = 0;
+        for (let i = s; step > 0 ? i <= e : i >= e; i += step) {
+          out.push(pad ? String(i).padStart(pad, '0') : String(i));
+          if (++n >= limit) break;
+        }
+        return out;
+      }
+      // single-char alpha / any codepoint
+      if (a.length === 1 && b.length === 1) {
+        const s = a.charCodeAt(0);
+        const e = b.charCodeAt(0);
+        const out = [];
+        const step = s <= e ? 1 : -1;
+        for (let i = s; step > 0 ? i <= e : i >= e; i += step) {
+          out.push(String.fromCharCode(i));
+        }
+        return out;
+      }
+      return [];
+    }
+
+    /** Expand one scope segment → list of string values */
+    function expandScopeSegment(seg) {
+      if (!seg) return [];
+      if (seg.type === 'specials') return ATK_SPECIALS.split('');
+      if (seg.type === 'list') {
+        return String(seg.values || '')
+          .split(',')
+          .map((x) => x.trim())
+          .filter((x) => x.length > 0);
+      }
+      if (seg.type === 'range') {
+        return expandRangeBounds(seg.from, seg.to);
+      }
+      if (seg.type === 'expr') {
+        return expandScopeExpression(seg.expr || '');
+      }
+      return [];
+    }
+
+    /**
+     * Parse brace expressions into ordered value lists (concatenated).
+     * {1..30} {a..z} {A..F} {#..#} {admin,root,1}
+     */
+    function expandScopeExpression(src) {
+      const text = String(src || '');
+      const re = /\{([^{}]*)\}/g;
+      const parts = [];
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        parts.push(m[1]);
+      }
+      if (!parts.length) {
+        // bare comma list without braces
+        if (text.includes(',')) {
+          return text.split(',').map((x) => x.trim()).filter(Boolean);
+        }
+        return text.trim() ? [text.trim()] : [];
+      }
+      let out = [];
+      parts.forEach((inner) => {
+        const t = inner.trim();
+        if (t === '#..#' || t === '#' || t.toLowerCase() === 'special' || t.toLowerCase() === 'specials') {
+          out = out.concat(ATK_SPECIALS.split(''));
+          return;
+        }
+        if (t.includes('..')) {
+          const [a, b] = t.split('..');
+          out = out.concat(expandRangeBounds(a, b));
+          return;
+        }
+        // comma list
+        out = out.concat(t.split(',').map((x) => x.trim()).filter(Boolean));
+      });
+      return out;
+    }
+
+    function parseExprToSegments(src) {
+      const text = String(src || '');
+      const re = /\{([^{}]*)\}/g;
+      const segs = [];
+      let m;
+      while ((m = re.exec(text)) !== null) {
+        const t = m[1].trim();
+        if (t === '#..#' || t === '#' || t.toLowerCase() === 'specials' || t.toLowerCase() === 'special') {
+          segs.push({ type: 'specials' });
+        } else if (t.includes('..')) {
+          const [a, b] = t.split('..');
+          segs.push({ type: 'range', from: (a || '').trim(), to: (b || '').trim() });
+        } else {
+          segs.push({ type: 'list', values: t });
+        }
+      }
+      return segs;
+    }
+
+    function valuesForSlot(n) {
+      const cfg = state.attackSlotConfig.slots[n];
+      if (!cfg || !cfg.segments || !cfg.segments.length) return [];
+      let out = [];
+      cfg.segments.forEach((seg) => {
+        out = out.concat(expandScopeSegment(seg));
+      });
+      // de-dupe preserve order
+      const seen = new Set();
+      return out.filter((v) => {
+        if (seen.has(v)) return false;
+        seen.add(v);
+        return true;
+      });
+    }
+
+    function summarizeSlot(n) {
+      const vals = valuesForSlot(n);
+      const cfg = state.attackSlotConfig.slots[n];
+      const segs = (cfg && cfg.segments) || [];
+      const bits = segs.slice(0, 3).map((s) => {
+        if (s.type === 'specials') return '{#..#}';
+        if (s.type === 'range') return `{${s.from}..${s.to}}`;
+        if (s.type === 'list') return `{${String(s.values || '').slice(0, 16)}}`;
+        return '?';
+      });
+      return {
+        count: vals.length,
+        label: bits.join(' + ') + (segs.length > 3 ? '…' : ''),
+        hasStop: !!(cfg && cfg.stop && slotStopEnabled(cfg.stop)),
+      };
+    }
+
+    function slotStopEnabled(stop) {
+      if (!stop) return false;
+      return !!(stop.body || stop.url || stop.time || stop.size || stop.status || stop.sizeDiff || stop.header || stop.title);
+    }
+
+    function estimateDollarCombos(slotsOrder) {
+      let total = 1;
+      for (const n of slotsOrder) {
+        const c = valuesForSlot(n).length;
+        total *= Math.max(1, c);
+        if (total > 1e9) return total;
+      }
+      return total;
+    }
+
+    function renderDollarSlotsUI(detectedSlots) {
+      const box = $('#atkDollarSlots');
+      if (!box) return;
+      if (!detectedSlots || !detectedSlots.length) {
+        box.innerHTML = '';
+        box.hidden = true;
+        return;
+      }
+      box.hidden = false;
+      const cfg = ensureAttackSlotState(detectedSlots);
+      const order = cfg.order.slice();
+      box.innerHTML = order.map((n, idx) => {
+        const sum = summarizeSlot(n);
+        const depth = idx === 0 ? 'outer' : (idx === order.length - 1 ? 'inner' : 'mid');
+        return `<div class="atk-loop-row" draggable="true" data-slot="${n}">
+          <span class="atk-loop-grip" title="Drag to reorder">⠿</span>
+          <span class="atk-loop-name">$${n}</span>
+          <span class="atk-slot-depth">${depth}</span>
+          <span class="atk-loop-summary" title="${escapeHtml(sum.label)}">${escapeHtml(sum.label || 'no scope')}</span>
+          <span class="atk-slot-count">${sum.count}</span>
+          <button type="button" class="btn btn-sm atk-loop-scope" data-slot="${n}">Scope</button>
+          <button type="button" class="btn btn-sm atk-loop-stop${sum.hasStop ? ' has-stop' : ''}" data-slot="${n}">Stop</button>
+        </div>`;
+      }).join('');
+
+      // Drag reorder
+      let dragN = null;
+      box.querySelectorAll('.atk-loop-row').forEach((row) => {
+        row.addEventListener('dragstart', (e) => {
+          dragN = +row.dataset.slot;
+          row.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        row.addEventListener('dragend', () => {
+          row.classList.remove('dragging');
+          dragN = null;
+        });
+        row.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          row.classList.add('drag-over');
+        });
+        row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+        row.addEventListener('drop', (e) => {
+          e.preventDefault();
+          row.classList.remove('drag-over');
+          const target = +row.dataset.slot;
+          if (dragN == null || dragN === target) return;
+          const ord = state.attackSlotConfig.order;
+          const from = ord.indexOf(dragN);
+          const to = ord.indexOf(target);
+          if (from < 0 || to < 0) return;
+          ord.splice(from, 1);
+          ord.splice(to, 0, dragN);
+          state.attackComboList = null;
+          renderDollarSlotsUI(detectedSlots);
+          refreshAttackPanelCounts();
+        });
+        row.querySelector('.atk-loop-scope')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openAttackScopeEditor(+row.dataset.slot);
+        });
+        row.querySelector('.atk-loop-stop')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openAttackSlotStop(+row.dataset.slot);
+        });
+      });
+    }
+
+    function refreshAttackPanelCounts() {
+      const mode = detectAttackMode();
+      if (!attackExpandCount) return;
+      if (mode.mode === 'dollar') {
+        const order = state.attackSlotConfig.order || mode.slots;
+        const n = estimateDollarCombos(order);
+        attackExpandCount.textContent = n > 1000000 ? `~${(n / 1e6).toFixed(1)}M` : String(n);
+      } else if (mode.payloads) {
+        attackExpandCount.textContent = `${mode.payloads.length} payloads`;
+      }
+    }
+
+    // ---- Scope editor ----
+    let _scopeEditSlot = null;
+    let _scopeEditSegments = [];
+
+    function openAttackScopeEditor(n) {
+      _scopeEditSlot = n;
+      const cfg = ensureAttackSlotState(detectDollarSlots()).slots[n] || { segments: [] };
+      _scopeEditSegments = JSON.parse(JSON.stringify(cfg.segments || []));
+      const title = $('#attackScopeTitle');
+      if (title) title.textContent = `$${n} Scope`;
+      const expr = $('#atkScopeExpr');
+      if (expr) expr.value = '';
+      renderScopeSegmentsEditor();
+      if (typeof openVPanel === 'function') openVPanel('attack-scope');
+      else $('#attackScopePanel')?.classList.add('open');
+    }
+
+    function renderScopeSegmentsEditor() {
+      const box = $('#atkScopeSegments');
+      if (!box) return;
+      if (!_scopeEditSegments.length) {
+        box.innerHTML = '<div class="adv-hint">No segments — add a range, specials, or list.</div>';
+      } else {
+        box.innerHTML = _scopeEditSegments.map((seg, i) => {
+          if (seg.type === 'specials') {
+            return `<div class="atk-seg-row" data-i="${i}">
+              <span class="atk-seg-label">{#..#} specials</span>
+              <span class="atk-slot-count">${ATK_SPECIALS.length}</span>
+              <button type="button" class="btn btn-sm btn-ghost atk-seg-del" data-i="${i}">✕</button>
+            </div>`;
+          }
+          if (seg.type === 'range') {
+            return `<div class="atk-seg-row" data-i="${i}">
+              <span class="atk-seg-label">Range</span>
+              <input type="text" class="atk-seg-from" data-i="${i}" value="${escapeHtml(seg.from || '')}" placeholder="from" spellcheck="false" />
+              <span>.. </span>
+              <input type="text" class="atk-seg-to" data-i="${i}" value="${escapeHtml(seg.to || '')}" placeholder="to" spellcheck="false" />
+              <span class="atk-slot-count">${expandRangeBounds(seg.from, seg.to).length}</span>
+              <button type="button" class="btn btn-sm btn-ghost atk-seg-del" data-i="${i}">✕</button>
+            </div>`;
+          }
+          // list
+          return `<div class="atk-seg-row" data-i="${i}">
+            <span class="atk-seg-label">List</span>
+            <input type="text" class="atk-seg-list" data-i="${i}" value="${escapeHtml(seg.values || '')}" placeholder="a,b,c" spellcheck="false" style="flex:1;" />
+            <button type="button" class="btn btn-sm btn-ghost atk-seg-del" data-i="${i}">✕</button>
+          </div>`;
+        }).join('');
+      }
+      box.querySelectorAll('.atk-seg-del').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          _scopeEditSegments.splice(+btn.dataset.i, 1);
+          renderScopeSegmentsEditor();
+        });
+      });
+      box.querySelectorAll('.atk-seg-from').forEach((inp) => {
+        inp.addEventListener('input', () => {
+          _scopeEditSegments[+inp.dataset.i].from = inp.value;
+          renderScopePreviewOnly();
+        });
+      });
+      box.querySelectorAll('.atk-seg-to').forEach((inp) => {
+        inp.addEventListener('input', () => {
+          _scopeEditSegments[+inp.dataset.i].to = inp.value;
+          renderScopePreviewOnly();
+        });
+      });
+      box.querySelectorAll('.atk-seg-list').forEach((inp) => {
+        inp.addEventListener('input', () => {
+          _scopeEditSegments[+inp.dataset.i].values = inp.value;
+          renderScopePreviewOnly();
+        });
+      });
+      renderScopePreviewOnly();
+    }
+
+    function renderScopePreviewOnly() {
+      let vals = [];
+      _scopeEditSegments.forEach((seg) => { vals = vals.concat(expandScopeSegment(seg)); });
+      const seen = new Set();
+      vals = vals.filter((v) => { if (seen.has(v)) return false; seen.add(v); return true; });
+      const countEl = $('#atkScopePreviewCount');
+      if (countEl) countEl.textContent = String(vals.length);
+      const prev = $('#atkScopePreview');
+      if (prev) {
+        const show = vals.slice(0, 40);
+        prev.innerHTML = show.map((v) => `<code>${escapeHtml(v)}</code>`).join(' ')
+          + (vals.length > 40 ? ` <span class="atk-mode-hint">+${vals.length - 40} more</span>` : '');
+      }
+    }
+
+    function bindAttackScopeUI() {
+      function addSeg(seg) {
+        if (!Array.isArray(_scopeEditSegments)) _scopeEditSegments = [];
+        _scopeEditSegments.push(seg);
+        renderScopeSegmentsEditor();
+      }
+      $('#atkScopeAddRange')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        addSeg({ type: 'range', from: '1', to: '10' });
+      });
+      $('#atkScopeAddSpecials')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        addSeg({ type: 'specials' });
+      });
+      $('#atkScopeAddList')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        addSeg({ type: 'list', values: '' });
+      });
+      function doParseExpr() {
+        const expr = ($('#atkScopeExpr')?.value || '').trim();
+        if (!expr) { showToast('Expression is empty'); return; }
+        let segs = parseExprToSegments(expr);
+        // fallback: bare "1..20" or "a,b,c" without braces
+        if (!segs.length && expr.includes('..')) {
+          const [a, b] = expr.split('..');
+          segs = [{ type: 'range', from: (a || '').trim(), to: (b || '').trim() }];
+        }
+        if (!segs.length && expr.includes(',')) {
+          segs = [{ type: 'list', values: expr }];
+        }
+        if (!segs.length) {
+          showToast('Nothing detected — use {1..20} or {a..z} or {a,b,c}');
+          return;
+        }
+        _scopeEditSegments = segs;
+        renderScopeSegmentsEditor();
+        showToast(`Parsed ${segs.length} segment(s)`, 'success');
+      }
+      $('#atkScopeParseExpr')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        doParseExpr();
+      });
+      $('#atkScopeExpr')?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          doParseExpr();
+        }
+      });
+      $('#atkScopeSaveBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (_scopeEditSlot == null) return;
+        const n = _scopeEditSlot;
+        ensureAttackSlotState(detectDollarSlots());
+        state.attackSlotConfig.slots[n].segments = JSON.parse(JSON.stringify(_scopeEditSegments));
+        state.attackComboList = null; // scopes changed → rebuild combos
+        if (typeof closeVPanel === 'function') closeVPanel('attack-scope');
+        else $('#attackScopePanel')?.classList.remove('open');
+        renderDollarSlotsUI(detectDollarSlots());
+        refreshAttackPanelCounts();
+        showToast(`$${n} scope saved`, 'success');
+      });
+    }
+
+    // ---- Per-slot stop ----
+    let _stopEditSlot = null;
+
+    function openAttackSlotStop(n) {
+      _stopEditSlot = n;
+      const title = $('#attackSlotStopTitle');
+      if (title) title.textContent = `$${n} Stop`;
+      const cfg = ensureAttackSlotState(detectDollarSlots()).slots[n] || {};
+      const stop = cfg.stop || {};
+      const set = (id, val, isCheck) => {
+        const el = $(id);
+        if (!el) return;
+        if (isCheck) el.checked = !!val;
+        else el.value = val != null ? val : '';
+      };
+      set('#slotStopBody', stop.body, true);
+      set('#slotStopBodyVal', stop.bodyVal || '');
+      set('#slotStopUrl', stop.url, true);
+      set('#slotStopUrlVal', stop.urlVal || '');
+      set('#slotStopTime', stop.time, true);
+      set('#slotStopTimeVal', stop.timeVal != null ? stop.timeVal : '');
+      set('#slotStopStatus', stop.status, true);
+      set('#slotStopStatusVal', stop.statusVal || '');
+      set('#slotStopSize', stop.size, true);
+      set('#slotStopSizeOp', stop.sizeOp || 'gt');
+      set('#slotStopSizeVal', stop.sizeVal != null ? stop.sizeVal : '');
+      set('#slotStopSizeDiff', stop.sizeDiff, true);
+      set('#slotStopSizeDiffVal', stop.sizeDiffVal != null ? stop.sizeDiffVal : '50');
+      set('#slotStopHeader', stop.header, true);
+      set('#slotStopHeaderVal', stop.headerVal || '');
+      set('#slotStopTitle', stop.title, true);
+      set('#slotStopTitleVal', stop.titleVal || '');
+      if (typeof openVPanel === 'function') openVPanel('attack-slot-stop');
+      else $('#attackSlotStopPanel')?.classList.add('open');
+    }
+
+    function readSlotStopForm() {
+      return {
+        body: !!$('#slotStopBody')?.checked,
+        bodyVal: $('#slotStopBodyVal')?.value || '',
+        url: !!$('#slotStopUrl')?.checked,
+        urlVal: $('#slotStopUrlVal')?.value || '',
+        time: !!$('#slotStopTime')?.checked,
+        timeVal: +($('#slotStopTimeVal')?.value || 0),
+        status: !!$('#slotStopStatus')?.checked,
+        statusVal: $('#slotStopStatusVal')?.value || '',
+        size: !!$('#slotStopSize')?.checked,
+        sizeOp: $('#slotStopSizeOp')?.value || 'gt',
+        sizeVal: +($('#slotStopSizeVal')?.value || 0),
+        sizeDiff: !!$('#slotStopSizeDiff')?.checked,
+        sizeDiffVal: +($('#slotStopSizeDiffVal')?.value || 50),
+        header: !!$('#slotStopHeader')?.checked,
+        headerVal: $('#slotStopHeaderVal')?.value || '',
+        title: !!$('#slotStopTitle')?.checked,
+        titleVal: $('#slotStopTitleVal')?.value || '',
+      };
+    }
+
+    function shouldStopSlot(entry, stop, baselineSize) {
+      if (!stop || !slotStopEnabled(stop)) return false;
+      const checks = [];
+      const body = entry.response?.body || '';
+      const respStatus = entry.response?.status;
+
+      function testRegex(raw, hay) {
+        if (!raw) return false;
+        const inv = raw.startsWith('!');
+        const pat = inv ? raw.slice(1) : raw;
+        try {
+          const re = new RegExp(pat, 'i');
+          const hit = re.test(hay || '');
+          return inv ? !hit : hit;
+        } catch {
+          return false;
+        }
+      }
+
+      if (stop.body && stop.bodyVal) checks.push(testRegex(stop.bodyVal, body));
+      if (stop.url && stop.urlVal) checks.push(testRegex(stop.urlVal, entry.url || ''));
+      if (stop.time) checks.push((entry.response?.timeMs || 0) >= (stop.timeVal || 0));
+
+      if (stop.status && stop.statusVal) {
+        const raw = String(stop.statusVal).trim();
+        const inv = raw.startsWith('!');
+        const list = (inv ? raw.slice(1) : raw).split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
+        const hit = list.some((c) => String(respStatus) === c);
+        checks.push(inv ? !hit : hit);
+      }
+
+      if (stop.size) {
+        const sz = body.length;
+        const v = stop.sizeVal || 0;
+        if (stop.sizeOp === 'lt') checks.push(sz <= v);
+        else if (stop.sizeOp === 'eq') checks.push(sz === v);
+        else checks.push(sz >= v);
+      }
+
+      if (stop.sizeDiff && baselineSize != null) {
+        const delta = Math.abs(body.length - baselineSize);
+        checks.push(delta >= (stop.sizeDiffVal || 0));
+      }
+
+      if (stop.header && stop.headerVal) {
+        const hdrs = entry.response?.headers || {};
+        const flat = Object.entries(hdrs).map(([k, v]) => `${k}: ${v}`).join('\n');
+        checks.push(testRegex(stop.headerVal, flat));
+      }
+
+      if (stop.title && stop.titleVal) {
+        let title = '';
+        const mTitle = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        if (mTitle) title = mTitle[1].replace(/\s+/g, ' ').trim();
+        checks.push(testRegex(stop.titleVal, title));
+      }
+
+      return checks.length > 0 && checks.every(Boolean);
+    }
+
+    function bindAttackSlotStopUI() {
+      $('#slotStopSaveBtn')?.addEventListener('click', () => {
+        if (_stopEditSlot == null) return;
+        const n = _stopEditSlot;
+        ensureAttackSlotState(detectDollarSlots());
+        state.attackSlotConfig.slots[n].stop = readSlotStopForm();
+        if (typeof closeVPanel === 'function') closeVPanel('attack-slot-stop');
+        else $('#attackSlotStopPanel')?.classList.remove('open');
+        renderDollarSlotsUI(detectDollarSlots());
+        showToast(`$${n} stop saved`, 'success');
+      });
+      $('#slotStopClear')?.addEventListener('click', () => {
+        ['#slotStopBody', '#slotStopUrl', '#slotStopTime', '#slotStopStatus', '#slotStopSize', '#slotStopSizeDiff', '#slotStopHeader', '#slotStopTitle'].forEach((id) => {
+          const el = $(id); if (el) el.checked = false;
+        });
+      });
+    }
+
+
+    // ---- Combinations viewer (search / edit / delete) ----
+    const ATK_COMBOS_UI_CAP = 8000;
+
+    function materializeAttackCombos() {
+      const slots = detectDollarSlots();
+      ensureAttackSlotState(slots);
+      const order = (state.attackSlotConfig.order || slots).slice();
+      const domains = order.map((n) => ({ n, values: valuesForSlot(n) }));
+      if (domains.some((d) => !d.values.length)) return [];
+      let total = 1;
+      domains.forEach((d) => { total *= d.values.length; });
+      if (total > ATK_COMBOS_UI_CAP) {
+        showToast(`Showing first ${ATK_COMBOS_UI_CAP} of ${total} combos`);
+      }
+      const out = [];
+      function rec(level, map) {
+        if (out.length >= ATK_COMBOS_UI_CAP) return;
+        if (level >= domains.length) {
+          const m = { ...map };
+          const payload = applyDollarMap((payloadInput.value || '').trim(), m);
+          out.push({ id: out.length + 1, map: m, payload });
+          return;
+        }
+        const d = domains[level];
+        for (let i = 0; i < d.values.length; i++) {
+          if (out.length >= ATK_COMBOS_UI_CAP) return;
+          map[d.n] = d.values[i];
+          rec(level + 1, map);
+        }
+      }
+      rec(0, {});
+      return out;
+    }
+
+    function ensureAttackComboList() {
+      if (!Array.isArray(state.attackComboList)) {
+        state.attackComboList = materializeAttackCombos();
+      }
+      return state.attackComboList;
+    }
+
+    function openAttackCombosPanel() {
+      try {
+        ensureAttackComboList();
+        renderAttackCombosList();
+        const panel = $('#attackCombosPanel');
+        if (typeof openVPanel === 'function') {
+          openVPanel('attack-combos');
+        } else if (panel) {
+          panel.classList.add('open');
+        }
+        if (panel) {
+          panel.style.zIndex = String(Math.max((panelZCounter || 500) + 20, 600));
+          panel.style.display = 'flex';
+          panel.style.opacity = '1';
+          panel.style.pointerEvents = 'auto';
+        }
+        if (vpanelBackdrop) {
+          vpanelBackdrop.classList.add('open');
+        }
+      } catch (err) {
+        console.error('[combos] open failed', err);
+        showToast('Combos open failed: ' + (err && err.message ? err.message : err));
+      }
+    }
+
+    function renderAttackCombosList() {
+      const list = ensureAttackComboList();
+      const q = (($('#atkCombosSearch')?.value) || '').trim().toLowerCase();
+      const box = $('#atkCombosList');
+      const countEl = $('#atkCombosCount');
+      if (!box) return;
+      const filtered = !q ? list : list.filter((row) => {
+        const mapStr = Object.entries(row.map).map(([k, v]) => `$${k}=${v}`).join(' ');
+        return (mapStr + ' ' + (row.payload || '')).toLowerCase().includes(q);
+      });
+      if (countEl) countEl.textContent = `${filtered.length}/${list.length}`;
+      if (!filtered.length) {
+        box.innerHTML = '<div class="adv-hint">No combinations</div>';
+        return;
+      }
+      box.innerHTML = filtered.map((row) => {
+        const mapStr = Object.entries(row.map).map(([k, v]) => `$${k}=${escapeHtml(String(v))}`).join(' ');
+        return `<div class="atk-combo-row" data-id="${row.id}">
+          <div class="atk-combo-map">${mapStr}</div>
+          <div class="atk-combo-payload" title="${escapeHtml(row.payload || '')}">${escapeHtml((row.payload || '').slice(0, 80))}</div>
+          <button type="button" class="btn btn-sm btn-ghost atk-combo-edit" data-id="${row.id}">Edit</button>
+          <button type="button" class="btn btn-sm btn-ghost atk-combo-del" data-id="${row.id}">✕</button>
+        </div>`;
+      }).join('');
+      box.querySelectorAll('.atk-combo-del').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = +btn.dataset.id;
+          state.attackComboList = ensureAttackComboList().filter((r) => r.id !== id);
+          refreshAttackPanelCountsFromList();
+          renderAttackCombosList();
+        });
+      });
+      box.querySelectorAll('.atk-combo-edit').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = +btn.dataset.id;
+          const row = ensureAttackComboList().find((r) => r.id === id);
+          if (!row) return;
+          const keys = Object.keys(row.map).sort((a, b) => +a - +b);
+          const next = {};
+          for (const k of keys) {
+            const v = prompt(`Value for $${k}`, String(row.map[k]));
+            if (v === null) return;
+            next[k] = v;
+          }
+          row.map = next;
+          row.payload = applyDollarMap((payloadInput.value || '').trim(), next);
+          renderAttackCombosList();
+        });
+      });
+    }
+
+    function refreshAttackPanelCountsFromList() {
+      if (attackExpandCount && Array.isArray(state.attackComboList)) {
+        attackExpandCount.textContent = String(state.attackComboList.length);
+      }
+    }
+
+    function bindAttackCombosUI() {
+      if (window.__atkCombosDelegated) return;
+      window.__atkCombosDelegated = true;
+      document.addEventListener('click', (e) => {
+        const openBtn = e.target && e.target.closest && e.target.closest('#atkCombosOpenBtn');
+        if (openBtn) {
+          e.preventDefault();
+          e.stopPropagation();
+          openAttackCombosPanel();
+          return;
+        }
+        const resetBtn = e.target && e.target.closest && e.target.closest('#atkCombosReset');
+        if (resetBtn) {
+          e.preventDefault();
+          state.attackComboList = materializeAttackCombos();
+          refreshAttackPanelCountsFromList();
+          renderAttackCombosList();
+          showToast('Combos rebuilt from scopes', 'success');
+        }
+      });
+      document.addEventListener('input', (e) => {
+        if (e.target && e.target.id === 'atkCombosSearch') renderAttackCombosList();
+      });
+    }
+
+
     function detectAttackMode() {
+      const slots = detectDollarSlots();
+      if (slots.length > 0) {
+        ensureAttackSlotState(slots);
+        return { isBatch: true, mode: 'dollar', slots, payloads: [] };
+      }
       const payloads = expandAllPayloads();
       const isBatch = payloads.length > 1 && payloads.some(p => p.isBatch);
-      return { isBatch, payloads };
+      return { isBatch, mode: isBatch ? 'brace' : 'single', slots: [], payloads };
     }
 
     // ===== Autocomplete =====
@@ -6559,19 +7298,34 @@ img, video, canvas { opacity: 0.9; }
     }
 
     function refreshAttackPanel() {
-      const { isBatch, payloads } = detectAttackMode();
+      const mode = detectAttackMode();
+      const { isBatch, payloads } = mode;
       const attackBtn = $('#payloadAttackBtn');
+      const hint = $('#atkModeHint');
       if (isBatch) {
-        if (attackExpandCount) attackExpandCount.textContent = `${payloads.length} payloads`;
-        if (attackPreview) {
-          const preview = payloads.slice(0, 12).map(p => `<span>${escapeHtml(p.text.slice(0, 40))}</span>`).join('');
-          attackPreview.innerHTML = preview + (payloads.length > 12 ? `<span>+${payloads.length - 12} more</span>` : '');
+        if (mode.mode === 'dollar') {
+          renderDollarSlotsUI(mode.slots);
+          if (hint) hint.textContent = 'Top row = outermost loop. Drag to reorder. Scope = {n..m} / {#..#} / list. Stop = advance only that loop.';
+          if (attackExpandCount) {
+            const n = estimateDollarCombos(state.attackSlotConfig.order || mode.slots);
+            attackExpandCount.textContent = n > 1000000 ? `~${(n / 1e6).toFixed(1)}M` : String(n);
+          }
+          if (attackPreview) attackPreview.innerHTML = '';
+        } else {
+          renderDollarSlotsUI([]);
+          if (hint) hint.textContent = 'Brace expansion mode — each {…} list becomes a payload.';
+          if (attackExpandCount) attackExpandCount.textContent = `${payloads.length} payloads`;
+          if (attackPreview) {
+            const preview = payloads.slice(0, 12).map(p => `<span>${escapeHtml(p.text.slice(0, 40))}</span>`).join('');
+            attackPreview.innerHTML = preview + (payloads.length > 12 ? `<span>+${payloads.length - 12} more</span>` : '');
+          }
         }
         if (attackBtn) attackBtn.classList.remove('hidden');
         syncSendButtonsLabel(true);
       } else {
+        renderDollarSlotsUI([]);
+        if (hint) hint.textContent = 'Use $1, $2… in Payload for nested variable attack, or {1..N} for list expansion.';
         if (attackBtn) attackBtn.classList.add('hidden');
-        // Close attack config panel if open when leaving batch mode
         if (attackConfigPanel && attackConfigPanel.classList.contains('open') && typeof closeVPanel === 'function') {
           closeVPanel('attack-config');
         }
@@ -6581,19 +7335,20 @@ img, video, canvas { opacity: 0.9; }
 
     function setProgress(done, total) {
       const pct = total ? Math.round((done / total) * 100) : 0;
-      urlProgressBar.style.width = pct + '%';
-      urlProgressBar.classList.toggle('active', total > 0 && done < total);
-      if (done >= total && total > 0) {
-        // brief full glow then settle
-        urlProgressBar.classList.remove('active');
+      if (urlProgressBar) {
+        urlProgressBar.style.width = pct + '%';
+        urlProgressBar.classList.toggle('active', total > 0 && done < total);
+        if (done >= total && total > 0) urlProgressBar.classList.remove('active');
       }
-      attackProgressLabel.textContent = `${done}/${total} (${pct}%)`;
-      attackProgressLabel.classList.toggle('hidden', total === 0);
+      if (attackProgressLabel) {
+        attackProgressLabel.textContent = `${done}/${total} (${pct}%)`;
+        attackProgressLabel.classList.toggle('hidden', total === 0);
+      }
     }
 
     function setAttackControls(running) {
-      pauseBtn.classList.toggle('hidden', !running);
-      stopBtn.classList.toggle('hidden', !running);
+      if (pauseBtn) pauseBtn.classList.toggle('hidden', !running);
+      if (stopBtn) stopBtn.classList.toggle('hidden', !running);
       document.body.classList.toggle('attack-running', !!running);
       if (!running) {
         urlProgressBar.style.width = '0%';
@@ -6641,22 +7396,24 @@ img, video, canvas { opacity: 0.9; }
     }
 
     function applySinglePayload(str, payloadText) {
-      // Replace $1 with this payload (and leave other $N if present using workbench lines)
+      // $1 in URL/body → inject this request's resolved payload text
+      // $2+ → other lines from the payload workbench (if any)
       if (!str) return str;
-      const lines = (payloadInput.value || '').split('\n');
-      return str.replace(/\$(\d+)/g, (match, num) => {
+      const text = payloadText == null ? '' : String(payloadText);
+      const lines = (payloadInput && payloadInput.value || '').split('\n');
+      return String(str).replace(/\$(\d+)/g, (match, num) => {
         const idx = parseInt(num, 10) - 1;
-        if (idx === 0) return payloadText;
+        if (idx === 0) return text;
         if (idx >= 0 && idx < lines.length) {
-          // For $2+ use first expanded variant of that line or raw line
-          const expanded = expandBraces(lines[idx]);
-          return expanded[0] || lines[idx];
+          const expanded = (typeof expandBraces === 'function') ? expandBraces(lines[idx]) : [lines[idx]];
+          return (expanded && expanded[0]) || lines[idx];
         }
         return match;
       });
     }
 
-    async function executeOneRequest(url, method, postBody, customHeaders, payloadText, batchId, batchName, attackIndex) {
+    async function executeOneRequest(url, method, postBody, customHeaders, payloadText, batchId, batchName, attackIndex, opts) {
+      opts = opts || {};
       const body = { url, method, headers: customHeaders };
       if (['POST', 'PUT', 'PATCH'].includes(method)) {
         body.post_data = postBody || '';
@@ -6666,11 +7423,13 @@ img, video, canvas { opacity: 0.9; }
       let respData = null;
       try {
         const apiBase = (window.location.port === '5000') ? '' : 'http://127.0.0.1:5000';
-        const res = await fetch(`${apiBase}/api/send-payload`, {
+        const fetchOpts = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        });
+        };
+        if (opts.signal) fetchOpts.signal = opts.signal;
+        const res = await fetch(`${apiBase}/api/send-payload`, fetchOpts);
         const data = await res.json();
         if (data.proxy_stats && typeof applyServerProxyStats === 'function') {
           applyServerProxyStats(data.proxy_stats);
@@ -6696,14 +7455,26 @@ img, video, canvas { opacity: 0.9; }
           };
         }
       } catch (err) {
-        respData = {
-          status: 0,
-          statusText: 'Proxy Unreachable',
-          timeMs: 0,
-          headers: {},
-          body: String(err),
-          fixedHtml: null,
-        };
+        if (err && (err.name === 'AbortError' || opts.signal?.aborted)) {
+          respData = {
+            status: 0,
+            statusText: 'Cancelled',
+            timeMs: 0,
+            headers: {},
+            body: 'Request cancelled by user',
+            fixedHtml: null,
+            cancelled: true,
+          };
+        } else {
+          respData = {
+            status: 0,
+            statusText: 'Proxy Unreachable',
+            timeMs: 0,
+            headers: {},
+            body: String(err),
+            fixedHtml: null,
+          };
+        }
       }
 
       const entry = {
@@ -6839,7 +7610,255 @@ img, video, canvas { opacity: 0.9; }
       return checks.length > 0 && checks.every(Boolean);
     }
 
+
+    async function runDollarAttack(slots) {
+      if (state.attack.active || state._attackLock) {
+        showToast('Attack already running');
+        return;
+      }
+
+      try {
+        ensureAttackSlotState(slots);
+        const order = (state.attackSlotConfig.order || slots).map((n) => +n);
+        // Prefer nested domains; only use edited combo list if user opened Combos
+        const useList = Array.isArray(state.attackComboList) && state.attackComboList.length > 0;
+
+        const domains = order.map((n) => ({
+          n: +n,
+          values: valuesForSlot(+n),
+          stop: (state.attackSlotConfig.slots[+n] && state.attackSlotConfig.slots[+n].stop) || null,
+        })).filter((d) => d.values.length > 0);
+
+        if (!useList) {
+          if (!domains.length) {
+            showToast('Configure Scope for each $ (empty domains)');
+            return;
+          }
+        }
+
+        state._attackLock = true;
+        state.isSending = true;
+        syncSendButtonsSending(true);
+
+        const defaultName = 'VarAttack ' + new Date().toLocaleTimeString();
+        let meta;
+        try {
+          meta = await promptAttackMeta(defaultName);
+        } catch (e) {
+          console.warn('[dollar-attack] meta dialog error', e);
+          meta = { name: defaultName, note: '', cancelled: false };
+        }
+        if (meta.cancelled) {
+          showToast('Attack cancelled');
+          return;
+        }
+
+        const attackName = meta.name || defaultName;
+        const attackNote = meta.note || '';
+        const method = methodSelect.value;
+        const urlTemplate = (urlInput && urlInput.value || '').trim();
+        if (!urlTemplate) {
+          showToast('Enter a target URL');
+          return;
+        }
+        let postBodyTemplate = postBodyInput ? postBodyInput.value : '';
+        const payloadTemplate = (payloadInput && payloadInput.value || '').trim();
+        const customHeaders = buildRequestHeaders(postBodyTemplate);
+        const delay = Math.max(0, +($('#atkDelay')?.value || 200));
+        const batchId = 'atk-' + Date.now();
+
+        let total = 1;
+        if (useList) total = state.attackComboList.length;
+        else domains.forEach((d) => { total *= d.values.length; });
+
+        state.attack = {
+          active: true, paused: false, stop: false,
+          total, done: 0, batchId, name: attackName, note: attackNote,
+          matchHits: 0, mode: 'dollar',
+        };
+        setAttackControls(true);
+        document.body.classList.add('attack-running');
+        if (!document.body.classList.contains('solo-payload')) {
+          const pw = $('#payloadWorkbench');
+          if (pw && pw.classList.contains('open') && !pw.classList.contains('pinned')) {
+            pw.classList.remove('open');
+          }
+          if (typeof closeVPanel === 'function') {
+            closeVPanel('attack-config');
+            closeVPanel('attack-scope');
+            closeVPanel('attack-slot-stop');
+            closeVPanel('attack-combos');
+          }
+          if (vpanelBackdrop) vpanelBackdrop.classList.remove('open');
+        }
+        setProgress(0, total);
+
+        if (!state.attackSources) state.attackSources = {};
+        state.attackSources[batchId] = {
+          name: attackName,
+          note: attackNote,
+          urlTemplate,
+          payloadText: payloadTemplate,
+          method,
+          postBody: postBodyTemplate,
+          headers: (state.headers || []).map(h => ({ ...h })),
+          atkConfig: {
+            delay,
+            timeout: +($('#atkTimeout')?.value || 15),
+            mode: 'dollar',
+            order,
+            domains: domains.map((d) => ({ n: d.n, count: d.values.length })),
+          },
+        };
+        if (typeof ensureAttackFilterOption === 'function') {
+          ensureAttackFilterOption(batchId, attackName);
+        }
+        state.historyStatusFilter = 'batch:' + batchId;
+        if (historyStatusFilter) historyStatusFilter.value = 'batch:' + batchId;
+
+        let baselineSize = null;
+        let stoppedEarly = false;
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+        async function fire(map) {
+          while (state.attack.paused && !state.attack.stop) await sleep(80);
+          if (state.attack.stop) return { status: 'stop' };
+          // 1) Expand attack slots ONLY inside the payload template ($1/$2 in Payload workbench)
+          const payloadText = applyDollarMap(payloadTemplate, map);
+          // 2) URL / body: $1 means "inject the fully-resolved payload" (never slot values).
+          //    Applying applyDollarMap to URL first was the bug — it turned member=$1 into member=1
+          //    using the slot map, so the real SQLi payload never left the workbench.
+          let url = applySinglePayload(urlTemplate, payloadText);
+          let postBody = applySinglePayload(postBodyTemplate, payloadText);
+          if (!url) {
+            console.warn('[dollar-attack] empty url after inject', map);
+            return { status: 'ok' };
+          }
+          if ((urlTemplate.includes('$') || (postBodyTemplate || '').includes('$')) &&
+              url === urlTemplate && !(postBodyTemplate && postBody !== postBodyTemplate)) {
+            // still useful when user forgot $1 — log once
+            if (!state.attack._warnedNoInject) {
+              state.attack._warnedNoInject = true;
+              showToast('URL/Body has no $1 — payload not injected into request', 'error');
+            }
+          }
+          let entry;
+          try {
+            entry = await executeOneRequest(
+              url, method, postBody, customHeaders, payloadText, batchId, attackName, null
+            );
+          } catch (err) {
+            console.error('[dollar-attack] request error', err);
+            entry = {
+              id: state.nextId++,
+              method, url, payload: payloadText,
+              response: { status: 0, statusText: String(err), timeMs: 0, headers: {}, body: String(err) },
+              timestamp: Date.now(),
+            };
+            state.history.unshift(entry);
+          }
+          if (attackNote) entry.note = attackNote;
+          entry.dollarMap = { ...map };
+          state.attack.done++;
+          setProgress(state.attack.done, state.attack.total);
+          state.activeHistoryId = entry.id;
+          const now = Date.now();
+          if (!state.attack._lastUi || now - state.attack._lastUi > 350 || state.attack.paused || state.attack.stop) {
+            state.attack._lastUi = now;
+            try {
+              if (typeof displayResponse === 'function') displayResponse(entry.response, entry.url);
+              if (typeof renderHistory === 'function') renderHistory();
+            } catch (uiErr) {
+              console.warn('[dollar-attack] ui update', uiErr);
+            }
+          }
+          if (baselineSize == null && entry.response && entry.response.status > 0) {
+            baselineSize = (entry.response.body || '').length;
+          }
+          let matchLevel = -1;
+          for (let li = domains.length - 1; li >= 0; li--) {
+            const d = domains[li];
+            if (d.stop && shouldStopSlot(entry, d.stop, baselineSize)) {
+              matchLevel = li;
+              break;
+            }
+          }
+          if (delay > 0 && !state.attack.stop) await sleep(delay);
+          if (matchLevel >= 0) return { status: 'match', level: matchLevel };
+          return { status: 'ok' };
+        }
+
+        async function recurse(level, map) {
+          if (state.attack.stop) return { status: 'stop' };
+          if (level >= domains.length) {
+            return fire({ ...map });
+          }
+          const d = domains[level];
+          for (let i = 0; i < d.values.length; i++) {
+            while (state.attack.paused && !state.attack.stop) await sleep(80);
+            if (state.attack.stop) return { status: 'stop' };
+            map[d.n] = d.values[i];
+            const r = await recurse(level + 1, map);
+            if (!r) continue;
+            if (r.status === 'stop') return r;
+            if (r.status === 'match') {
+              if (r.level < level) return r;
+              if (r.level === level) {
+                showToast(`$${d.n} stop → outer advances`, 'success');
+                break;
+              }
+            }
+          }
+          return { status: 'ok' };
+        }
+
+        console.log('[dollar-attack] start', { total, useList, domains: domains.map(d => ({ n: d.n, c: d.values.length })), order });
+
+        if (useList) {
+          const queue = state.attackComboList.slice();
+          for (let qi = 0; qi < queue.length; qi++) {
+            while (state.attack.paused && !state.attack.stop) await sleep(80);
+            if (state.attack.stop) break;
+            const row = queue[qi];
+            const r = await fire({ ...(row.map || {}) });
+            if (r.status === 'stop') break;
+            if (r.status === 'match' && r.level >= 0 && domains[r.level]) {
+              const outerKeys = domains.slice(0, r.level + 1).map((d) => d.n);
+              while (qi + 1 < queue.length) {
+                const next = queue[qi + 1];
+                const same = outerKeys.every((k) => String((next.map || {})[k]) === String((row.map || {})[k]));
+                if (!same) break;
+                qi++;
+              }
+            }
+          }
+        } else {
+          await recurse(0, {});
+        }
+
+        showToast(
+          stoppedEarly || state.attack.stop
+            ? `Attack stopped — ${state.attack.done}/${state.attack.total}`
+            : `Attack complete — ${state.attack.done}/${state.attack.total}`,
+          'success'
+        );
+      } catch (err) {
+        console.error('[dollar-attack] fatal', err);
+        showToast('Attack error: ' + (err && err.message ? err.message : String(err)));
+      } finally {
+        state.isSending = false;
+        state._attackLock = false;
+        syncSendButtonsSending(false);
+        setAttackControls(false);
+        try { renderHistory(); } catch (_) {}
+        if (typeof setPayloadCollapsed === 'function') setPayloadCollapsed(true);
+      }
+    }
+
     async function runAttack(payloads) {
+
+
+
       // Guard against double-start (dialog wait used to leave isSending=false)
       if (state.attack.active || state._attackLock) return;
       state._attackLock = true;
@@ -7018,33 +8037,60 @@ img, video, canvas { opacity: 0.9; }
     }
 
     async function sendRequest() {
+      // Attack running → same button stops the attack
+      if (state.attack.active) {
+        state.attack.stop = true;
+        state.attack.paused = false;
+        showToast('Stopping attack…');
+        return;
+      }
+      // Cancel in-flight single request (same button acts as Cancel)
+      if (state.isSending && !state.attack.active) {
+        if (state._sendAbort) {
+          try { state._sendAbort.abort(); } catch {}
+        }
+        state._sendAbort = null;
+        state.isSending = false;
+        syncSendButtonsSending(false);
+        showToast('Request cancelled', 'success');
+        return;
+      }
       if (state.attack.active || state._attackLock) return;
       if (state.isSending) return;
 
       const url = urlInput.value.trim();
       if (!url) { showToast('Enter a target URL'); urlInput.focus(); return; }
 
-      // Persist to URL history (browser-like suggestions)
       if (typeof rememberUrl === 'function') rememberUrl(url);
 
-      const { isBatch, payloads } = detectAttackMode();
+      const mode = detectAttackMode();
 
-      if (isBatch) {
-        if (payloads.length > 500) {
-          showToast(`Too many payloads (${payloads.length}). Max 500.`);
+      if (mode.isBatch) {
+        if (mode.mode === 'dollar') {
+          const combos = estimateDollarCombos(mode.slots);
+          if (combos > 50000) {
+            showToast(`Too many combinations (${combos}). Narrow charsets (max 50k).`);
+            return;
+          }
+          if (combos < 1) {
+            showToast('Select at least one charset for each $ slot');
+            return;
+          }
+          await runDollarAttack(mode.slots);
           return;
         }
-        await runAttack(payloads);
+        if (mode.payloads.length > 500) {
+          showToast(`Too many payloads (${mode.payloads.length}). Max 500.`);
+          return;
+        }
+        await runAttack(mode.payloads);
         return;
       }
 
-      // Single request
+      // Single request — AbortController so Cancel works during long timeouts
       state.isSending = true;
-      [sendBtn, $('#payloadSendBtn')].forEach((b) => {
-        if (!b) return;
-        b.classList.add('loading');
-        b.disabled = true;
-      });
+      state._sendAbort = new AbortController();
+      syncSendButtonsSending(true);
 
       const method = methodSelect.value;
       const payload = payloadInput.value.trim();
@@ -7054,33 +8100,61 @@ img, video, canvas { opacity: 0.9; }
       postBody = applyPayloadPlaceholders(postBody);
       const customHeaders = buildRequestHeaders(postBody);
 
-      const entry = await executeOneRequest(finalUrl, method, postBody, customHeaders, payload, null);
+      const entry = await executeOneRequest(
+        finalUrl, method, postBody, customHeaders, payload, null, null, null,
+        { signal: state._sendAbort.signal }
+      );
+      state._sendAbort = null;
       state.activeHistoryId = entry.id;
 
-      $$('.tab-btn').forEach(b => b.classList.remove('active'));
-      $$('.tab-content').forEach(c => c.classList.remove('active'));
-      const renderedTabBtn = document.querySelector('.tab-btn[data-tab="rendered"]');
-      if (renderedTabBtn) renderedTabBtn.classList.add('active');
-      const renderedTab = $('#tab-rendered');
-      if (renderedTab) renderedTab.classList.add('active');
-      activeTab = 'rendered';
-
-      displayResponse(entry.response, finalUrl);
-      renderHistory();
+      if (!entry.response?.cancelled) {
+        $$('.tab-btn').forEach(b => b.classList.remove('active'));
+        $$('.tab-content').forEach(c => c.classList.remove('active'));
+        const renderedTabBtn = document.querySelector('.tab-btn[data-tab="rendered"]');
+        if (renderedTabBtn) renderedTabBtn.classList.add('active');
+        const renderedTab = $('#tab-rendered');
+        if (renderedTab) renderedTab.classList.add('active');
+        activeTab = 'rendered';
+        displayResponse(entry.response, finalUrl);
+        renderHistory();
+        if (typeof setPayloadCollapsed === 'function') setPayloadCollapsed(true);
+        if (entry.response.status > 0) {
+          showToast(`#${entry.id} → ${entry.response.status} (${entry.response.timeMs}ms)`, 'success');
+        }
+      } else {
+        // cancelled — remove empty history entry if we want cleaner list
+        const idx = state.history.findIndex((h) => h.id === entry.id);
+        if (idx >= 0 && entry.response.cancelled) {
+          state.history.splice(idx, 1);
+          renderHistory();
+        }
+      }
 
       state.isSending = false;
+      syncSendButtonsSending(false);
+    }
+
+    function syncSendButtonsSending(sending) {
       [sendBtn, $('#payloadSendBtn')].forEach((b) => {
         if (!b) return;
-        b.classList.remove('loading');
+        b.classList.toggle('loading', !!sending);
+        // Keep enabled so user can click Cancel
         b.disabled = false;
+        const textEl = b.querySelector('.btn-text');
+        if (sending) {
+          if (textEl) textEl.textContent = 'Cancel';
+          else b.textContent = 'Cancel';
+          b.classList.add('is-cancel');
+        } else {
+          b.classList.remove('is-cancel');
+          // restore label from attack mode
+          if (typeof detectAttackMode === 'function' && typeof syncSendButtonsLabel === 'function') {
+            syncSendButtonsLabel(!!detectAttackMode().isBatch);
+          } else if (textEl) {
+            textEl.textContent = 'Send Request';
+          }
+        }
       });
-
-      // Free vertical space for response analysis after send
-      if (typeof setPayloadCollapsed === 'function') setPayloadCollapsed(true);
-
-      if (entry.response.status > 0) {
-        showToast(`#${entry.id} → ${entry.response.status} (${entry.response.timeMs}ms)`, 'success');
-      }
     }
 
     sendBtn.addEventListener('click', sendRequest);
@@ -7092,6 +8166,7 @@ img, video, canvas { opacity: 0.9; }
     $('#payloadAttackBtn')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
       if (typeof openVPanel === 'function') openVPanel('attack-config');
       else attackConfigPanel?.classList.add('open');
     });
@@ -8213,6 +9288,9 @@ img, video, canvas { opacity: 0.9; }
       bindTargetUrlSync();
       bindCrossTabSync();
       bindHistResponseUI();
+      if (typeof bindAttackScopeUI === 'function') bindAttackScopeUI();
+      if (typeof bindAttackSlotStopUI === 'function') bindAttackSlotStopUI();
+      if (typeof bindAttackCombosUI === 'function') bindAttackCombosUI();
       syncTopbarHeight();
       window.addEventListener('resize', syncTopbarHeight);
       if (isSoloSettings) enterSoloPanelMode('settings');

@@ -6466,7 +6466,7 @@ body.solo-payload .top-bar-tools {
 }
 
 /* Hide unrelated panels; keep payload + companions (library / converter / settings) */
-body.solo-payload .vpanel:not(#payloadWorkbench):not(#payloadLibPanel):not(#converterPanel):not(#settingsPanel):not(#attackConfigPanel):not(#attackNameDialog) {
+body.solo-payload .vpanel:not(#payloadWorkbench):not(#payloadLibPanel):not(#converterPanel):not(#settingsPanel):not(#attackConfigPanel):not(#attackNameDialog):not(#attackScopePanel):not(#attackSlotStopPanel):not(#attackCombosPanel) {
   display: none !important;
 }
 
@@ -6953,7 +6953,7 @@ body.solo-history #histResponsePanel.open {
 }
 
 /* Solo Payload: allow attack config panel */
-body.solo-payload .vpanel:not(#payloadWorkbench):not(#payloadLibPanel):not(#converterPanel):not(#settingsPanel):not(#attackConfigPanel):not(#attackNameDialog) {
+body.solo-payload .vpanel:not(#payloadWorkbench):not(#payloadLibPanel):not(#converterPanel):not(#settingsPanel):not(#attackConfigPanel):not(#attackNameDialog):not(#attackScopePanel):not(#attackSlotStopPanel):not(#attackCombosPanel) {
   /* keep previous solo-payload rules if any — this is additive override below */
 }
 body.solo-payload #attackConfigPanel.open {
@@ -7245,4 +7245,350 @@ body.solo-history #histResponsePanel.open {
   overflow: visible;
   max-width: none;
   flex-wrap: wrap;
+}
+
+/* Send button acts as Cancel while request in flight */
+#sendBtn.is-cancel,
+#payloadSendBtn.is-cancel {
+  border-color: rgba(255, 71, 87, 0.65) !important;
+  background: rgba(255, 71, 87, 0.18) !important;
+  color: #ff8a9a !important;
+  box-shadow: 0 0 14px rgba(255, 71, 87, 0.25);
+}
+#sendBtn.is-cancel .btn-text,
+#payloadSendBtn.is-cancel .btn-text {
+  color: inherit;
+}
+
+/* Dollar-slot attack config */
+.atk-mode-hint {
+  margin: 0;
+  padding: 8px 14px 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.atk-dollar-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 14px 4px;
+  max-height: min(40vh, 320px);
+  overflow-y: auto;
+}
+.atk-slot-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.atk-slot-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.atk-slot-head strong {
+  font-family: var(--font-mono);
+  color: var(--accent-cyan);
+  font-size: 13px;
+}
+.atk-slot-depth {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.atk-slot-count {
+  margin-left: auto;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: #ffd93d;
+}
+.atk-slot-sets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.atk-chip {
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.03);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.atk-chip:hover {
+  border-color: rgba(0,229,255,0.4);
+  color: var(--accent-cyan);
+}
+.atk-chip.on {
+  border-color: rgba(108,92,231,0.65);
+  background: rgba(108,92,231,0.2);
+  color: #c4b5fd;
+  box-shadow: 0 0 10px rgba(108,92,231,0.2);
+}
+.atk-slot-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+}
+.atk-slot-custom-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  outline: none;
+}
+.atk-slot-custom-input:focus {
+  border-color: rgba(0,229,255,0.45);
+}
+.atk-slot-order-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 0 2px;
+}
+.atk-preview-tpl {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent-cyan);
+}
+
+
+/* Attack loop order rows */
+.atk-loop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  cursor: grab;
+}
+.atk-loop-row.dragging { opacity: 0.5; }
+.atk-loop-row.drag-over {
+  border-color: rgba(0, 229, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(0, 229, 255, 0.25);
+}
+.atk-loop-grip {
+  color: var(--text-muted);
+  font-size: 14px;
+  user-select: none;
+}
+.atk-loop-name {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent-cyan);
+  min-width: 28px;
+}
+.atk-loop-summary {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.atk-loop-scope,
+.atk-loop-stop {
+  flex-shrink: 0;
+}
+.atk-loop-stop.has-stop {
+  border-color: rgba(255, 217, 61, 0.55);
+  color: #ffd93d;
+}
+.atk-footer-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--border);
+}
+.atk-global-grid {
+  padding: 8px 14px 4px;
+}
+.atk-scope-examples {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.atk-scope-examples code {
+  font-family: var(--font-mono);
+  color: var(--accent-cyan);
+  background: rgba(0, 229, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+  margin-right: 2px;
+}
+.atk-scope-segments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.atk-seg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+}
+.atk-seg-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  min-width: 52px;
+}
+.atk-seg-from,
+.atk-seg-to,
+.atk-seg-list {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  outline: none;
+  min-width: 0;
+  width: 64px;
+}
+.atk-seg-list { flex: 1; width: auto; }
+.atk-scope-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.atk-scope-preview-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.atk-scope-preview {
+  max-height: 100px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.atk-scope-preview code {
+  font-family: var(--font-mono);
+  margin-right: 6px;
+  color: var(--text-secondary);
+}
+#attackScopePanel,
+#attackSlotStopPanel {
+  z-index: 580;
+  width: min(520px, 94vw) !important;
+  max-height: min(82vh, 640px) !important;
+}
+
+.atk-combos-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.atk-combos-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+.atk-combo-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 1.2fr) minmax(100px, 2fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.atk-combo-row:hover { background: rgba(255,255,255,0.03); }
+.atk-combo-map {
+  font-family: var(--font-mono);
+  color: var(--accent-cyan);
+  font-size: 11px;
+}
+.atk-combo-payload {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#attackCombosPanel {
+  z-index: 580;
+  width: min(640px, 96vw) !important;
+  max-height: min(85vh, 700px) !important;
+}
+
+#attackCombosPanel.vpanel.float-center {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: min(640px, 96vw) !important;
+  max-height: min(85vh, 700px) !important;
+  height: auto !important;
+  transform: translate(-50%, -50%) scale(0.96);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 580;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden;
+}
+#attackCombosPanel.vpanel.float-center.open {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: translate(-50%, -50%) scale(1) !important;
+}
+#attackScopePanel.vpanel.float-center,
+#attackSlotStopPanel.vpanel.float-center {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) scale(0.96);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 580;
+  display: flex !important;
+  flex-direction: column !important;
+}
+#attackScopePanel.vpanel.float-center.open,
+#attackSlotStopPanel.vpanel.float-center.open {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: translate(-50%, -50%) scale(1) !important;
 }
