@@ -4,6 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SQLlix — Manual SQL Injection Lab</title>
+  <link type="image/png" sizes="32x32" rel="icon" href="https://img.icons8.com/glassmorphism/32/database.png" />
+
   <link rel="stylesheet" href="css/styles.css" />
   <link rel="stylesheet" href="css/welcome.css" />
 
@@ -199,8 +201,19 @@
             <pre class="raw-response" id="rawResponse">No response data.</pre>
           </div>
           <div id="tab-headers" class="tab-content">
-            <div class="meta-table-wrap" id="metaTableWrap">
-              <div class="meta-empty">No metadata available.</div>
+            <div class="meta-split">
+              <section class="meta-section meta-section-response">
+                <h3 class="meta-section-title">Response Headers &amp; Metadata</h3>
+                <div class="meta-table-wrap" id="metaTableWrap">
+                  <div class="meta-empty">No metadata available.</div>
+                </div>
+              </section>
+              <section class="meta-section meta-section-request">
+                <h3 class="meta-section-title meta-title-request">Request Headers</h3>
+                <div class="meta-table-wrap meta-table-request" id="reqMetaTableWrap">
+                  <div class="meta-empty">No request headers.</div>
+                </div>
+              </section>
             </div>
           </div>
           <div class="response-statusbar" id="responseStatusbar">
@@ -253,7 +266,7 @@
               <div class="vpanel-close-extras-inner">
                 <button type="button" class="pin-btn vpanel-action-btn" id="payloadPinBtn" title="Pin panel">⊙</button>
                 <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="payloadShelfBtn" title="Minimize to tray" hidden>↙</button>
-                <button type="button" class="pin-btn vpanel-action-btn" id="payloadPopoutBtn" title="Open in new tab">↗</button>
+                <button type="button" class="pin-btn vpanel-action-btn" id="payloadPopoutBtn" data-popout-panel="payload" title="Open in new tab">↗</button>
               </div>
             </div>
             <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
@@ -366,7 +379,7 @@
               <div class="vpanel-close-extras-inner">
               <button type="button" class="pin-btn vpanel-action-btn" id="historyPinBtn" title="Pin panel">⊙</button>
               <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="historyShelfBtn" title="Minimize to tray" hidden>↙</button>
-              <button type="button" class="pin-btn vpanel-action-btn" id="historyPopoutBtn" title="Open in new tab">↗</button>
+              <button type="button" class="pin-btn vpanel-action-btn" id="historyPopoutBtn" data-popout-panel="history" title="Open in new tab">↗</button>
               </div>
             </div>
             <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
@@ -379,12 +392,32 @@
         <div class="history-filter-row">
           <input type="text" id="historySearch" class="history-search" placeholder="Search URL, payload, name…" spellcheck="false" />
         </div>
-        <div class="history-filter-row hf-chip-row" id="hfChipRow">
-          <!-- chips rendered by JS -->
-        </div>
-        <div class="history-filter-row" style="justify-content:space-between;">
+        <div class="history-filter-row hf-toolbar">
+          <div class="hf-tool-cluster hf-filter-cluster" id="hfFilterCluster">
+            <button type="button" class="hf-tool-btn" id="hfFilterTrigger" title="Filters">
+              <span class="hf-tool-ico" aria-hidden="true">◈</span>
+              <span class="hf-tool-label">Filter</span>
+            </button>
+            <div class="hf-tool-tray hf-filter-tray" id="hfFilterTray">
+              <div class="hf-chip-row" id="hfChipRow"><!-- chips by JS --></div>
+              <button type="button" class="btn btn-sm hf-adv-btn" id="hfAdvBtn" title="Advanced filters">Advanced…</button>
+            </div>
+          </div>
+          <div class="hf-tool-cluster hf-sort-cluster" id="hfSortCluster">
+            <button type="button" class="hf-tool-btn" id="hfSortTrigger" title="Sort">
+              <span class="hf-tool-ico" aria-hidden="true">⇅</span>
+              <span class="hf-tool-label">Sort</span>
+            </button>
+            <div class="hf-tool-tray hf-sort-tray" id="historySortBar">
+              <button class="sort-btn active" data-key="time" data-dir="desc" title="Click to toggle">Time ↓</button>
+              <button class="sort-btn" data-key="order" data-dir="asc" title="Attack order {1..N}">Order ↑</button>
+              <button class="sort-btn" data-key="status" data-dir="desc" title="Click to toggle">Status ↓</button>
+              <button class="sort-btn" data-key="size" data-dir="desc" title="Click to toggle">Size ↓</button>
+              <button class="sort-btn" data-key="rtt" data-dir="desc" title="Click to toggle">RTT ↓</button>
+              <button class="sort-btn" data-key="redir" data-dir="desc" title="Redirects first">Redirect</button>
+            </div>
+          </div>
           <span class="hf-match-count" id="hfMatchCount"></span>
-          <button type="button" class="btn btn-sm hf-adv-btn" id="hfAdvBtn" title="Advanced filters">⚙ Advanced</button>
         </div>
         <!-- Hidden select kept for batch filter compatibility -->
         <select id="historyStatusFilter" class="hidden" aria-hidden="true" tabindex="-1">
@@ -398,15 +431,6 @@
           <option value="5xx">5xx</option>
           <option value="0">ERR</option>
         </select>
-      </div>
-      <div class="history-sort-bar" id="historySortBar">
-        <span class="sort-label">Sort</span>
-        <button class="sort-btn active" data-key="time" data-dir="desc" title="Click to toggle">Time ↓</button>
-        <button class="sort-btn" data-key="order" data-dir="asc" title="Attack order {1..N}">Order ↑</button>
-        <button class="sort-btn" data-key="status" data-dir="desc" title="Click to toggle">Status ↓</button>
-        <button class="sort-btn" data-key="size" data-dir="desc" title="Click to toggle">Size ↓</button>
-        <button class="sort-btn" data-key="rtt" data-dir="desc" title="Click to toggle">RTT ↓</button>
-        <button class="sort-btn" data-key="redir" data-dir="desc" title="Redirects first">Redirect</button>
       </div>
       <div id="attackSourceBar" class="attack-source-bar hidden">
         <button id="restoreAttackBtn" class="btn btn-sm restore-atk-btn" title="Restore URL, payloads and attack settings for this batch">
@@ -423,7 +447,7 @@
           <strong>Select attacks</strong>
           <button type="button" class="btn btn-sm btn-ghost" id="atkPickerSelectAll">All</button>
           <button type="button" class="btn btn-sm btn-ghost" id="atkPickerSelectNone">None</button>
-          <button type="button" class="btn btn-sm" id="atkPickerClose" style="margin-left:auto;">✕</button>
+          <button type="button" class="vpanel-close atk-picker-x" id="atkPickerClose" style="margin-left:auto;" title="Close">×</button>
         </div>
         <div class="atk-picker-list" id="atkPickerList"></div>
         <div class="atk-picker-footer">
@@ -458,24 +482,17 @@
         <div class="history-filter-row">
           <input type="text" id="toolsSearch" class="history-search" placeholder="Search tools…" spellcheck="false" />
         </div>
-        <div class="history-filter-row hf-chip-row" id="toolsChipRow">
-          <button type="button" class="hf-chip chip-all active" data-tools-filter="all">All</button>
-          <button type="button" class="hf-chip chip-rule" data-tools-filter="recon">Recon</button>
-          <button type="button" class="hf-chip chip-rule" data-tools-filter="network">Network</button>
-        </div>
       </div>
       <div class="tools-list" id="toolsPickerList">
-        <button type="button" class="tools-list-item" data-open-tool="cheatsheet" data-tools-cat="recon">
+        <button type="button" class="tools-list-item" data-open-tool="cheatsheet">
           <div class="tools-list-top">
-            <span class="tools-list-badge badge-recon">Recon</span>
             <strong>Cheat Sheet</strong>
           </div>
           <div class="tools-list-desc">Multi-DB functions, payloads, pin favorites</div>
           <div class="tools-list-meta"><span>Open →</span></div>
         </button>
-        <button type="button" class="tools-list-item" data-open-tool="proxy" data-tools-cat="network">
+        <button type="button" class="tools-list-item" data-open-tool="proxy">
           <div class="tools-list-top">
-            <span class="tools-list-badge badge-net">Network</span>
             <strong>Proxy</strong>
           </div>
           <div class="tools-list-desc">Upstream proxy, traffic stats, live ping</div>
@@ -686,7 +703,7 @@
               <div class="vpanel-close-extras-inner">
               <button type="button" class="pin-btn vpanel-action-btn" id="settingsPinBtn" title="Pin panel">⊙</button>
               <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="settingsShelfBtn" title="Minimize to tray" hidden>↙</button>
-              <button type="button" class="pin-btn vpanel-action-btn" id="settingsPopoutBtn" title="Open in new tab">↗</button>
+              <button type="button" class="pin-btn vpanel-action-btn" id="settingsPopoutBtn" data-popout-panel="settings" title="Open in new tab">↗</button>
               </div>
             </div>
             <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
@@ -893,6 +910,11 @@
             </div>
             <button id="recordNavBtn" class="night-protect-btn" title="Record navigations">● Record</button>
           </div>
+        </div>
+        <div class="settings-section">
+          <h3>Session</h3>
+          <div class="hint" style="margin-bottom:10px;">Browser storage used by SQLlix (localStorage). Open manager to inspect size and clear categories.</div>
+          <button type="button" class="btn btn-sm btn-primary" id="sessionMgrOpenBtn" title="Open Session Manager">Open Session Manager…</button>
         </div>
       </div>
     </div>
@@ -1468,7 +1490,29 @@
 
   <div id="toast" class="toast"></div>
 
+  
+  <!-- Session Manager (opens from Settings → General) -->
+  <div class="vpanel float-center dialog-modal" id="sessionMgrPanel" data-panel="session-mgr">
+    <div class="vpanel-header">
+      <h2>Session Manager</h2>
+      <div class="vpanel-header-actions">
+        <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+      </div>
+    </div>
+    <div class="vpanel-body" style="padding:14px 16px;display:flex;flex-direction:column;gap:12px;min-height:0;">
+      <div class="session-mgr-toolbar">
+        <span id="sessionMgrTotal" class="session-mgr-total">—</span>
+        <button type="button" class="btn btn-sm btn-ghost" id="sessionMgrRefreshBtn">Refresh</button>
+        <button type="button" class="btn btn-sm" id="sessionMgrClearAllBtn" style="color:var(--danger);margin-left:auto;">Clear all</button>
+      </div>
+      <div id="sessionMgrList" class="session-mgr-list"></div>
+      <p class="hint" style="margin:0;">Clearing a category removes only that data. History clear also drops attack sources stored with it.</p>
+    </div>
+  </div>
+
   <script src="js/app.js"></script>
+  <script src="js/attack.js"></script>
+  <script src="js/proxy.js"></script>
   <script src="js/welcome.js"></script>
   <!-- TEMP UI debugger — delete this line + static/js/ui-debugger.js to remove -->
   <script src="js/ui-debugger.js"></script>

@@ -50,6 +50,10 @@
     const methodSelect = $('#methodSelect');
     const urlInput = $('#urlInput');
     const sendBtn = $('#sendBtn');
+    const urlProgressBar = $('#urlProgressBar');
+    const pauseBtn = $('#pauseBtn');
+    const stopBtn = $('#stopBtn');
+    const attackProgressLabel = $('#attackProgressLabel');
     const toggleHeadersBtn = $('#toggleHeadersBtn');
     const headersPanel = $('#headersPanel');
     const headersList = $('#headersList');
@@ -1861,31 +1865,23 @@
     })();
 
     // Tools search / filter (history-style)
-    (function bindToolsFilter() {
+    // Tools list — search only (no category chips)
+    (function bindToolsListSearch() {
       const search = $('#toolsSearch');
       const list = $('#toolsPickerList');
       if (!list) return;
       const apply = () => {
-        const q = (search?.value || '').trim().toLowerCase();
-        const activeChip = document.querySelector('#toolsChipRow .hf-chip.active');
-        const cat = activeChip?.dataset.toolsFilter || 'all';
+        const q = ((search && search.value) || '').trim().toLowerCase();
         list.querySelectorAll('.tools-list-item, .tools-picker-item').forEach((el) => {
           const text = (el.textContent || '').toLowerCase();
-          const elCat = el.dataset.toolsCat || 'all';
-          const catOk = cat === 'all' || elCat === cat;
           const qOk = !q || text.includes(q);
-          el.classList.toggle('hidden', !(catOk && qOk));
+          el.classList.toggle('hidden', !qOk);
+          el.style.display = qOk ? '' : 'none';
         });
       };
-      search?.addEventListener('input', apply);
-      $$('#toolsChipRow .hf-chip').forEach((chip) => {
-        chip.addEventListener('click', () => {
-          $$('#toolsChipRow .hf-chip').forEach((c) => c.classList.remove('active'));
-          chip.classList.add('active');
-          apply();
-        });
-      });
+      if (search) search.addEventListener('input', apply);
     })();
+
 
 
     // Show / hide Request Body section based on HTTP method
@@ -2040,28 +2036,33 @@
     }
 
     function getKnownAttacks() {
-      // Prefer attackSources, also discover from history
+      // Count ONLY from history (once). Names from attackSources / batchName.
       const map = {};
       Object.entries(state.attackSources || {}).forEach(([id, src]) => {
-        map[id] = {
-          id,
-          name: src.name || id,
-          count: state.history.filter(h => h.batchId === id).length,
-        };
+        map[id] = { id, name: (src && src.name) || id, count: 0 };
       });
-      state.history.forEach(h => {
+      state.history.forEach((h) => {
         if (!h.batchId) return;
         if (!map[h.batchId]) {
-          map[h.batchId] = {
-            id: h.batchId,
-            name: h.batchName || h.batchId,
-            count: 0,
-          };
+          map[h.batchId] = { id: h.batchId, name: h.batchName || h.batchId, count: 0 };
         }
-        map[h.batchId].count++;
+        map[h.batchId].count += 1;
         if (h.batchName) map[h.batchId].name = h.batchName;
       });
-      return Object.values(map).sort((a, b) => (b.count - a.count));
+      const activeBatch = (state.attack && state.attack.active) ? state.attack.batchId : null;
+      // Purge empty attackSources from state (except in-flight attack)
+      Object.keys(state.attackSources || {}).forEach((id) => {
+        if (id === activeBatch) return;
+        if (!map[id] || map[id].count === 0) {
+          delete state.attackSources[id];
+          if (state.collapsedBatches) delete state.collapsedBatches[id];
+          state.selectedBatchIds = (state.selectedBatchIds || []).filter((x) => x !== id);
+          delete map[id];
+        }
+      });
+      return Object.values(map)
+        .filter((a) => a.count > 0 || a.id === activeBatch)
+        .sort((a, b) => (b.count - a.count) || String(a.name).localeCompare(String(b.name)));
     }
 
     function openAttackPicker() {
@@ -2195,10 +2196,24 @@
 
     // ===== Advanced History Filter Engine =====
     const HF_RULES_KEY = 'sqli-workbench-hf-rules';
+
+    // History action icons (SVG — not emoji)
+    const HIST_ICO = {
+      gear: '<svg class="hi" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.07 7.07 0 0 0-1.63-.94l-.36-2.54A.5.5 0 0 0 14.3 2h-4.6a.5.5 0 0 0-.49.42l-.36 2.54c-.6.24-1.14.55-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.3 8.48a.5.5 0 0 0 .12.64l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.42 14.6a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.68.22l2.39-.96c.49.39 1.03.7 1.63.94l.36 2.54c.05.24.25.42.49.42h4.6c.24 0 .44-.18.49-.42l.36-2.54c.6-.24 1.14-.55 1.63-.94l2.39.96c.25.12.54.02.68-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>',
+      star: '<svg class="hi" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.5l2.9 5.88 6.49.94-4.7 4.58 1.11 6.47L12 17.77l-5.8 3.05 1.11-6.47-4.7-4.58 6.49-.94L12 2.5z"/></svg>',
+      starOut: '<svg class="hi" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.7" d="M12 3.2l2.6 5.27 5.82.85-4.21 4.1 1 5.8L12 16.5l-5.21 2.72 1-5.8-4.21-4.1 5.82-.85L12 3.2z"/></svg>',
+      trash: '<svg class="hi" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a1 1 0 0 0 1-1V7H5v13a1 1 0 0 0 1 1z"/></svg>',
+      download: '<svg class="hi" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M11 3h2v10.2l3.1-3.1 1.4 1.4L12 17l-5.5-5.5 1.4-1.4L11 13.2V3zM5 19h14v2H5v-2z"/></svg>',
+      note: '<svg class="hi" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3h11l3 3v15H5V3zm10 1.5V7h2.5L15 4.5zM7 10h10v2H7v-2zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/></svg>',
+      code: '<svg class="hi" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8.1 16.9L3.2 12l4.9-4.9 1.4 1.4L6 12l3.5 3.5-1.4 1.4zm7.8 0l-1.4-1.4L18 12l-3.5-3.5 1.4-1.4 4.9 4.9-4.9 4.9z"/></svg>',
+      globe: '<svg class="hi" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm7.4 9h-3.1a15 15 0 0 0-1.3-5.3A8 8 0 0 1 19.4 11zM12 4c.9 0 2.3 2.1 3 5H9c.7-2.9 2.1-5 3-5zM4.6 13h3.1c.2 1.9.7 3.7 1.3 5.3A8 8 0 0 1 4.6 13zm3.1-2H4.6a8 8 0 0 1 4.4-5.3A15 15 0 0 0 7.7 11zM12 20c-.9 0-2.3-2.1-3-5h6c-.7 2.9-2.1 5-3 5zm2.3-1.7c.6-1.6 1.1-3.4 1.3-5.3h3.1a8 8 0 0 1-4.4 5.3zM9.9 13c.2 1.9.7 3.6 1.3 5h1.6c.6-1.4 1.1-3.1 1.3-5H9.9z"/></svg>',
+    };
+
     const HF_PRESETS = [
       { id: 'all', label: 'All', cls: 'chip-all' },
       { id: 'starred', label: '★ Star', cls: 'chip-star' },
       { id: '2xx', label: '2xx', cls: 'chip-2xx' },
+      { id: '3xx', label: '3xx', cls: 'chip-3xx' },
       { id: '4xx', label: '4xx', cls: 'chip-4xx' },
       { id: '5xx', label: '5xx', cls: 'chip-5xx' },
       { id: '0', label: 'ERR', cls: 'chip-err' },
@@ -2513,15 +2528,35 @@
       const row = $('#hfChipRow');
       if (!row) return;
       const active = state.hfActive || 'all';
-      let html = HF_PRESETS.map(p => {
-        const isActive = active === p.id;
-        return `<button type="button" class="hf-chip ${p.cls}${isActive ? ' active' : ''}" data-hf="${p.id}"><span class="chip-dot"></span>${p.label}</button>`;
-      }).join('');
-      // Custom rules
-      (state.hfRules || []).forEach(r => {
-        const isActive = active === 'rule:' + r.id;
-        html += `<button type="button" class="hf-chip chip-rule${isActive ? ' active' : ''}" data-hf="rule:${r.id}" title="${escapeHtml(r.name)}"><span class="chip-dot"></span>${escapeHtml(r.name)}<span class="chip-x" data-del-rule="${r.id}" title="Delete">×</span></button>`;
-      });
+      const mk = (id, label, cls, title) => {
+        const on = active === id || (id === 'batch' && String(active).startsWith('batch:'));
+        return `<button type="button" class="hf-chip ${cls}${on ? ' active' : ''}" data-hf="${id}" title="${title || label}">${label}</button>`;
+      };
+      // One glance: status row + type row (no select, no mystery)
+      let html = '<div class="hf-glance">';
+      html += '<div class="hf-glance-row hf-glance-status" role="group" aria-label="Status filter">';
+      html += mk('all', 'All', 'chip-all', 'Show everything');
+      html += mk('starred', '★', 'chip-star', 'Starred only');
+      html += mk('2xx', '2xx', 'chip-2xx', 'HTTP 2xx');
+      html += mk('3xx', '3xx', 'chip-3xx', 'HTTP 3xx redirects');
+      html += mk('4xx', '4xx', 'chip-4xx', 'HTTP 4xx client errors');
+      html += mk('5xx', '5xx', 'chip-5xx', 'HTTP 5xx server errors');
+      html += mk('0', 'ERR', 'chip-err', 'Network / proxy errors');
+      html += '</div>';
+      html += '<div class="hf-glance-row hf-glance-type" role="group" aria-label="Request type">';
+      html += mk('single', 'Single', 'chip-type', 'Manual single requests');
+      html += mk('batch', 'Attacks', 'chip-type chip-atk', 'SQLi attack batches — opens picker');
+      html += '</div>';
+      const rules = state.hfRules || [];
+      if (rules.length) {
+        html += '<div class="hf-glance-row hf-glance-rules" role="group" aria-label="Custom rules">';
+        rules.forEach((r) => {
+          const on = active === 'rule:' + r.id;
+          html += `<button type="button" class="hf-chip chip-rule${on ? ' active' : ''}" data-hf="rule:${r.id}" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}<span class="chip-x" data-del-rule="${r.id}" title="Delete rule">×</span></button>`;
+        });
+        html += '</div>';
+      }
+      html += '</div>';
       row.innerHTML = html;
       row.querySelectorAll('.hf-chip').forEach(chip => {
         chip.addEventListener('click', (e) => {
@@ -2795,6 +2830,37 @@
       }
     }
 
+
+    function buildCurlCommand(item) {
+      if (!item) return '';
+      const method = (item.method || 'GET').toUpperCase();
+      const url = item.url || '';
+      let cmd = 'curl -i';
+      if (method !== 'GET') cmd += ` -X ${method}`;
+      // Prefer headers captured with the request; else current settings headers
+      const hdrs = item.headers && typeof item.headers === 'object'
+        ? item.headers
+        : (Array.isArray(state.headers)
+            ? Object.fromEntries(state.headers.filter((h) => h.key).map((h) => [h.key, h.value || '']))
+            : {});
+      Object.keys(hdrs || {}).forEach((k) => {
+        if (!k) return;
+        const v = hdrs[k] == null ? '' : String(hdrs[k]);
+        cmd += ` \\\n  -H ${shellQuote(k + ': ' + v)}`;
+      });
+      const body = item.postBody || '';
+      if (body && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+        cmd += ` \\\n  --data-binary ${shellQuote(body)}`;
+      }
+      cmd += ` \\\n  ${shellQuote(url)}`;
+      return cmd;
+    }
+    function shellQuote(s) {
+      const str = String(s == null ? '' : s);
+      if (/^[A-Za-z0-9_./:@%+=,-]+$/.test(str)) return str;
+      return "'" + str.replace(/'/g, "'\\''") + "'";
+    }
+
     function renderHistory() {
       const histBadge = $('#historyBadge');
       if (histBadge) {
@@ -2891,7 +2957,7 @@
         const exactTime = formatExactTime(item.timestamp);
         const wasRedirected = item.response.finalUrl && item.response.finalUrl !== item.url;
         const redirectBadge = wasRedirected
-          ? `<span class="redirect-badge" data-final-url="${escapeHtml(item.response.finalUrl)}" title="Redirected to:\n${escapeHtml(item.response.finalUrl)}\nClick to load Final URL">↳ REDIR</span>`
+          ? `<span class="redirect-badge" data-final-url="${escapeHtml(item.response.finalUrl)}" title="Redirected → ${escapeHtml(item.response.finalUrl)}\nClick to load Final URL"><svg class="redir-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8 7h7.2L12.6 4.4 14 3l6 6-6 6-1.4-1.4L15.2 11H8a5 5 0 0 0 0 10h3v2H8a7 7 0 0 1 0-14z"/></svg></span>`
           : '';
 
         let sizeClass = '';
@@ -2929,10 +2995,17 @@
               <span title="${escapeHtml(exactTime)}">${relTime}</span>
             </span>
             <div class="history-actions">
-              <button class="hist-btn pin-btn ${item.pinned ? 'pinned' : ''}" data-id="${item.id}" title="${item.pinned ? 'Unstar' : 'Star'}">
-                ${item.pinned ? '★' : '☆'}
-              </button>
-              <button class="hist-btn del-btn" data-id="${item.id}" title="Delete">✕</button>
+              <div class="hist-more-cluster" title="Actions">
+                <div class="hist-more-extras">
+                  <button type="button" class="hist-btn pin-btn${item.pinned ? ' pinned' : ''}" data-id="${item.id}" title="${item.pinned ? 'Unstar' : 'Star'}">${item.pinned ? HIST_ICO.star : HIST_ICO.starOut}</button>
+                  <button type="button" class="hist-btn del-btn hist-ico-trash" data-id="${item.id}" title="Delete">${HIST_ICO.trash}</button>
+                  <button type="button" class="hist-btn hist-dl-file hist-ico-dl" data-id="${item.id}" title="Download request as .txt">${HIST_ICO.download}</button>
+                  <button type="button" class="hist-btn hist-note-btn hist-ico-note${state.openNoteId === item.id ? ' active' : ''}" data-id="${item.id}" title="Toggle note">${HIST_ICO.note}</button>
+                  <button type="button" class="hist-btn hist-curl-btn hist-ico-curl" data-id="${item.id}" title="Copy as cURL">${HIST_ICO.code}</button>
+                  <button type="button" class="hist-btn hist-dl-url hist-ico-url" data-id="${item.id}" title="Copy full URL">${HIST_ICO.globe}</button>
+                </div>
+                <button type="button" class="hist-more-trigger" title="Settings">${HIST_ICO.gear}</button>
+              </div>
             </div>
           </div>
           <div class="history-detail">
@@ -2942,15 +3015,12 @@
               ${item.payload ? `<div class="hist-req-row"><span class="hist-req-k">Payload</span><code class="hist-req-v hist-req-payload">${escapeHtml(String(item.payload))}</code></div>` : ''}
               ${item.postBody ? `<div class="hist-req-row hist-req-body-row"><span class="hist-req-k">Body</span><pre class="hist-req-body" title="${escapeHtml(String(item.postBody))}">${escapeHtml(String(item.postBody).slice(0, 800))}${String(item.postBody).length > 800 ? '\n…' : ''}</pre></div>` : ''}
             </div>
-            <textarea class="hist-note" data-id="${item.id}" placeholder="Note for this request…" spellcheck="false">${noteVal}</textarea>
+            <textarea class="hist-note${state.openNoteId === item.id ? ' is-open' : ''}" data-id="${item.id}" placeholder="Note for this request…" spellcheck="false" ${state.openNoteId === item.id ? '' : 'hidden'}>${noteVal}</textarea>
             <div class="history-detail-actions">
               <button type="button" class="btn btn-sm hist-apply-wb" data-id="${item.id}" title="Copy this request into URL / Body editors (overwrites workbench)">Load into editor</button>
-              <button type="button" class="btn btn-sm hist-dl-url" data-id="${item.id}" title="Copy full URL">Copy URL</button>
-              <button type="button" class="btn btn-sm hist-dl-file" data-id="${item.id}" title="Download request info as .txt">Download</button>
               ${document.body.classList.contains('solo-history')
                 ? `<button type="button" class="btn btn-sm hist-view-response" data-id="${item.id}" title="Open Rendered / Raw / Headers viewer">Response</button>`
                 : ''}
-              <span class="note-hint">auto-saved</span>
             </div>
           </div>`;
 
@@ -2958,7 +3028,7 @@
 
         // Click to load + open detail (ignore if clicking buttons, redirect badge, detail, or editing name)
         el.addEventListener('click', (e) => {
-          if (e.target.closest('.hist-btn') || e.target.closest('.redirect-badge') ||
+          if (e.target.closest('.hist-btn') || e.target.closest('.hist-more-cluster') || e.target.closest('.redirect-badge') ||
               e.target.closest('.history-detail') || e.target.classList.contains('history-name')) return;
           state.openDetailId = item.id;
           loadHistoryItem(item.id);
@@ -3094,6 +3164,51 @@
         });
       });
 
+
+      // Note toggle — opens detail + note in one click (no need to expand row first)
+      historyList.querySelectorAll('.hist-note-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = +btn.dataset.id;
+          if (state.openNoteId === id) {
+            state.openNoteId = null;
+          } else {
+            state.openNoteId = id;
+            state.openDetailId = id;
+            state.activeHistoryId = id;
+            if (typeof loadHistoryItem === 'function') loadHistoryItem(id);
+          }
+          renderHistory();
+          if (state.openNoteId === id) {
+            requestAnimationFrame(() => {
+              const ta = historyList.querySelector('.hist-note[data-id="' + id + '"]');
+              if (ta) {
+                ta.hidden = false;
+                ta.classList.add('is-open');
+                try { ta.focus(); } catch (err) {}
+              }
+            });
+          }
+        });
+      });
+
+      // Copy as cURL
+      historyList.querySelectorAll('.hist-curl-btn').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = +btn.dataset.id;
+          const item = state.history.find((h) => h.id === id);
+          if (!item) return;
+          const curl = buildCurlCommand(item);
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(curl).then(() => showToast('cURL copied', 'success'))
+              .catch(() => showToast('Copy failed'));
+          } else {
+            showToast('Clipboard unavailable');
+          }
+        });
+      });
+
       // Delete buttons
       historyList.querySelectorAll('.del-btn').forEach((btn) => {
         btn.addEventListener('click', (e) => {
@@ -3209,14 +3324,34 @@
     }
 
     function deleteHistoryItem(id) {
-      state.history = state.history.filter(h => h.id !== id);
+      const doomed = state.history.find((h) => h.id === id);
+      const batchId = doomed && doomed.batchId;
+      state.history = state.history.filter((h) => h.id !== id);
       if (state.activeHistoryId === id) {
         state.activeHistoryId = null;
-        clearResponseView();
+        if (typeof clearResponseView === 'function') clearResponseView();
+      }
+      if (batchId && !state.history.some((h) => h.batchId === batchId)) {
+        if (state.attackSources) delete state.attackSources[batchId];
+        if (state.collapsedBatches) delete state.collapsedBatches[batchId];
+        state.selectedBatchIds = (state.selectedBatchIds || []).filter((x) => x !== batchId);
+        const optVal = 'batch:' + batchId;
+        if (typeof historyStatusFilter !== 'undefined' && historyStatusFilter) {
+          const opt = [...historyStatusFilter.options].find((o) => o.value === optVal);
+          if (opt) opt.remove();
+        }
+        if (state.hfActive === optVal || state.historyStatusFilter === optVal) {
+          state.hfActive = 'all';
+          state.historyStatusFilter = 'all';
+          if (historyStatusFilter) historyStatusFilter.value = 'all';
+        }
+        if (typeof renderHfChips === 'function') renderHfChips();
+        showToast('Attack cleared (0 requests)');
+      } else {
+        showToast('Deleted');
       }
       renderHistory();
       if (typeof scheduleHistorySave === 'function') scheduleHistorySave();
-      showToast('Deleted');
     }
 
     /**
@@ -3860,6 +3995,8 @@
       state.lastRenderedHtml = '';
       rawResponse.innerHTML = 'No response data.';
       metaTableWrap.innerHTML = '<div class="meta-empty">No metadata available.</div>';
+      const reqWrap = document.getElementById('reqMetaTableWrap');
+      if (reqWrap) reqWrap.innerHTML = '<div class="meta-empty">No request headers.</div>';
       $('#sbStatus').textContent = '—';
       $('#sbTime').textContent = '—';
       $('#sbSize').textContent = '—';
@@ -3905,6 +4042,36 @@
       // Cookie import UI when Set-Cookie present
       tableHtml += renderCookieImportPanel(resp.headers);
       metaTableWrap.innerHTML = tableHtml;
+      // Request headers — same categorized / colorful table as response
+      const reqWrap = document.getElementById('reqMetaTableWrap');
+      if (reqWrap) {
+        const histItem = state.history.find((h) => h.id === state.activeHistoryId);
+        const reqH = (histItem && histItem.headers) ? histItem.headers : {};
+        const reqKeys = Object.keys(reqH || {});
+        if (!reqKeys.length) {
+          reqWrap.innerHTML = '<div class="meta-empty">No request headers stored for this entry.</div>';
+        } else {
+          const reqLegend = `<div class="meta-legend">
+            <span><i style="background:#ff6b6b"></i> Security</span>
+            <span><i style="background:#ffd93d"></i> Auth / Cookie</span>
+            <span><i style="background:#6bcB77"></i> Cache</span>
+            <span><i style="background:#4dabf7"></i> Content</span>
+            <span><i style="background:#b197fc"></i> Server</span>
+            <span><i style="background:#ff922b"></i> CORS</span>
+          </div>`;
+          let reqTable = reqLegend + '<table class="meta-table">';
+          const method = histItem && histItem.method ? histItem.method : '';
+          const url = histItem && histItem.url ? histItem.url : (targetUrl || '');
+          if (method || url) {
+            reqTable += `<tr><th>Method</th><td><span class="meta-val-num">${escapeHtml(method || '—')}</span></td></tr>`;
+            reqTable += `<tr class="meta-cat-content"><th><span class="meta-key">URL</span><span class="meta-badge content">Target</span></th><td><span class="meta-val-url">${escapeHtml(url)}</span></td></tr>`;
+          }
+          reqTable += highlightHeadersTable(reqH);
+          reqTable += '</table>';
+          reqWrap.innerHTML = reqTable;
+        }
+      }
+
       bindCookieImportPanel();
 
       // Prefer backend's fixed_html (already has <base> injected), otherwise do it client-side
@@ -5187,6 +5354,7 @@ img, video, canvas { opacity: 0.9; }
       'attack-dialog': '#attackNameDialog',
       'payload-lib': '#payloadLibPanel',
       converter: '#converterPanel',
+      'session-mgr': '#sessionMgrPanel',
       'attack-config': '#attackConfigPanel',
       'hist-response': '#histResponsePanel',
       'cookie-bulk-import': '#cookieBulkImportPanel',
@@ -5308,7 +5476,7 @@ img, video, canvas { opacity: 0.9; }
       if (!panel) return;
 
       // Pin = never auto-close. Work panels stack (don't kill each other).
-      const MODALS = new Set(['settings', 'adv-filter', 'attack-dialog', 'attack-config', 'hist-response', 'cookie-bulk-import', 'cookie-bulk-export', 'attack-scope', 'attack-slot-stop', 'attack-combos']);
+      const MODALS = new Set(['settings', 'adv-filter', 'attack-dialog', 'attack-config', 'hist-response', 'cookie-bulk-import', 'cookie-bulk-export', 'attack-scope', 'attack-slot-stop', 'attack-combos', 'session-mgr']);
       const WORK = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'tools', 'payload-lib', 'converter']);
 
       Object.keys(VPANEL_MAP).forEach((k) => {
@@ -5330,8 +5498,8 @@ img, video, canvas { opacity: 0.9; }
       panel.classList.add('open');
       activeVPanel = name;
 
-      // History drawer: clear leftover pinned geometry so the full-height drawer opens cleanly
-      if (name === 'history' && !panel.classList.contains('pinned')) {
+      // Drawers: clear leftover pinned geometry so slide-in works (tools was stuck off-screen)
+      if ((name === 'history' || name === 'tools') && !panel.classList.contains('pinned')) {
         panel.style.top = '';
         panel.style.left = '';
         panel.style.right = '';
@@ -5340,6 +5508,8 @@ img, video, canvas { opacity: 0.9; }
         panel.style.height = '';
         panel.style.maxHeight = '';
         panel.style.transform = '';
+        panel.style.margin = '';
+        panel.style.position = '';
       }
 
       // Raise z-index so the opened panel is on top of any stack underneath
@@ -5503,15 +5673,23 @@ img, video, canvas { opacity: 0.9; }
         // Pinned windows stay open (otherwise ↓ never appears)
         panel.classList.add('open');
         // Always ensure pinned geometry (drawers otherwise stay full-height)
+        panel.style.position = 'fixed';
+        panel.style.transform = 'none';
+        panel.style.bottom = 'auto';
         if (!panel.style.top) panel.style.top = defaults.top || '80px';
         if (!panel.style.left && !panel.style.right) {
-          panel.style.left = defaults.left || '16px';
-          panel.style.right = defaults.right || 'auto';
+          if (defaults.right) {
+            panel.style.right = defaults.right;
+            panel.style.left = 'auto';
+          } else {
+            panel.style.left = defaults.left || '16px';
+            panel.style.right = 'auto';
+          }
         }
         if (!panel.style.width) panel.style.width = defaults.width || '360px';
         if (!panel.style.height) panel.style.height = defaults.height || Math.min(window.innerHeight * 0.7, 620) + 'px';
-        // History drawer: force float metrics
-        if (name === 'history') {
+        // Drawers: force float metrics when pinned
+        if (name === 'history' || name === 'tools') {
           panel.style.bottom = 'auto';
           if (!panel.style.height) panel.style.height = Math.min(window.innerHeight * 0.7, 620) + 'px';
         }
@@ -5523,11 +5701,18 @@ img, video, canvas { opacity: 0.9; }
           : name === 'proxy' ? 'Proxy' : name;
         showToast(`${label} pinned — drag & resize`, 'success');
       } else {
+        // Full reset so drawers (tools/history) slide from the edge again
         panel.style.top = '';
         panel.style.left = '';
         panel.style.right = '';
+        panel.style.bottom = '';
         panel.style.width = '';
         panel.style.height = '';
+        panel.style.maxHeight = '';
+        panel.style.transform = '';
+        panel.style.margin = '';
+        panel.style.position = '';
+        panel.classList.remove('is-dragging', 'no-transition');
         if (panel.classList.contains('open') && vpanelBackdrop) {
           vpanelBackdrop.classList.add('open');
         }
@@ -5673,29 +5858,55 @@ img, video, canvas { opacity: 0.9; }
     function setupPinnedDrag(panelSel, handleSel) {
       const handle = $(handleSel);
       if (!handle) return;
-      handle.addEventListener('mousedown', (e) => {
+      // pointer events track better than mouse; flatten transform so left/top match the cursor
+      handle.addEventListener('pointerdown', (e) => {
         const panel = $(panelSel);
-        if (!panel || !panel.classList.contains('pinned')) return;
-        if (e.target.closest('button')) return;
+        if (!panel || !panel.classList.contains('pinned') || !panel.classList.contains('open')) return;
+        if (e.button != null && e.button !== 0) return;
+        if (e.target.closest('button, input, select, textarea, a, .vpanel-close-cluster')) return;
+
         e.preventDefault();
+        e.stopPropagation();
+
         const rect = panel.getBoundingClientRect();
+        // Flatten any CSS transform / right-based layout into fixed left+top
+        panel.style.position = 'fixed';
+        panel.style.left = rect.left + 'px';
+        panel.style.top = rect.top + 'px';
+        panel.style.width = rect.width + 'px';
+        panel.style.height = rect.height + 'px';
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        panel.style.transform = 'none';
+        panel.style.margin = '0';
+        panel.classList.add('no-transition', 'is-dragging');
+
         const ox = e.clientX - rect.left;
         const oy = e.clientY - rect.top;
-        panel.style.right = 'auto';
-        panel.classList.add('no-transition');
+        const minVisible = 48;
+
         const onMove = (ev) => {
-          let x = Math.max(0, Math.min(window.innerWidth - 80, ev.clientX - ox));
-          let y = Math.max(0, Math.min(window.innerHeight - 40, ev.clientY - oy));
+          let x = ev.clientX - ox;
+          let y = ev.clientY - oy;
+          const maxX = Math.max(0, window.innerWidth - minVisible);
+          const maxY = Math.max(0, window.innerHeight - minVisible);
+          // Keep at least minVisible px of the panel on-screen
+          x = Math.max(-(rect.width - minVisible), Math.min(maxX, x));
+          y = Math.max(0, Math.min(maxY, y));
           panel.style.left = x + 'px';
           panel.style.top = y + 'px';
         };
         const onUp = () => {
-          panel.classList.remove('no-transition');
-          document.removeEventListener('mousemove', onMove);
-          document.removeEventListener('mouseup', onUp);
+          panel.classList.remove('no-transition', 'is-dragging');
+          try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+          document.removeEventListener('pointermove', onMove, true);
+          document.removeEventListener('pointerup', onUp, true);
+          document.removeEventListener('pointercancel', onUp, true);
         };
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
+        try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+        document.addEventListener('pointermove', onMove, true);
+        document.addEventListener('pointerup', onUp, true);
+        document.addEventListener('pointercancel', onUp, true);
       });
     }
 
@@ -5794,13 +6005,14 @@ img, video, canvas { opacity: 0.9; }
     // Keep legacy names used elsewhere
     // ===== Keyboard Shortcuts System =====
     // Use Ctrl+Alt / function keys to avoid browser conflicts (Ctrl+P print, Ctrl+H history, Ctrl+F find, …)
-    const SHORTCUTS_KEY = 'sqli-workbench-shortcuts-v2';
+    const SHORTCUTS_KEY = 'sqli-workbench-shortcuts-v3';
     const DEFAULT_SHORTCUTS = {
       openPayload:   { label: 'Open Payload', group: 'Panels', key: 'p', ctrl: true, shift: false, alt: true },
       openHistory:   { label: 'Open History', group: 'Panels', key: 'h', ctrl: true, shift: false, alt: true },
       openTools:     { label: 'Open Tools', group: 'Panels', key: 'k', ctrl: true, shift: false, alt: true },
       openSettings:  { label: 'Open Settings', group: 'Panels', key: 's', ctrl: true, shift: false, alt: true },
-      sendRequest:   { label: 'Send Request', group: 'Actions', key: 'Enter', ctrl: true, shift: false, alt: false },
+      sendRequest:   { label: 'Send Request', group: 'Actions', key: 'Enter', ctrl: false, shift: false, alt: false },
+      cancelRequest: { label: 'Cancel Send / Stop Attack', group: 'Actions', key: 'Enter', ctrl: true, shift: false, alt: false },
       closePanel:    { label: 'Close panel', group: 'Panels', key: 'Escape', ctrl: false, shift: false, alt: false },
       histDelete:    { label: 'Delete selected history item', group: 'History', key: 'Delete', ctrl: false, shift: false, alt: false },
       histRename:    { label: 'Rename selected history item', group: 'History', key: 'F2', ctrl: false, shift: false, alt: false },
@@ -5889,6 +6101,7 @@ img, video, canvas { opacity: 0.9; }
         case 'openTools': toggleVPanel('tools'); break;
         case 'openSettings': toggleVPanel('settings'); break;
         case 'sendRequest': if (typeof sendRequest === 'function') sendRequest(); break;
+        case 'cancelRequest': if (typeof cancelInFlightRequest === 'function') cancelInFlightRequest(); break;
         case 'closePanel':
           if (activeVPanel) {
             const el = $(VPANEL_MAP[activeVPanel]);
@@ -5961,10 +6174,20 @@ img, video, canvas { opacity: 0.9; }
           const isMod = s.ctrl || s.alt;
           const isSpecial = ['Escape', 'F2', 'Delete', 'Enter'].includes(s.key);
           // Allow Ctrl+Enter send even in inputs; allow F2/Delete only when not in a text field for rename context
-          if (id === 'sendRequest' && s.ctrl && s.key === 'Enter') {
+          if (id === 'cancelRequest' && s.ctrl && s.key === 'Enter') {
             e.preventDefault();
             runShortcutAction(id);
             return;
+          }
+          // Enter alone to send — only from URL field (not payload textarea / notes)
+          if (id === 'sendRequest' && !s.ctrl && s.key === 'Enter') {
+            const t = e.target;
+            if (t && (t.id === 'urlInput' || t.classList.contains('url-input'))) {
+              e.preventDefault();
+              runShortcutAction(id);
+              return;
+            }
+            continue;
           }
           if (!isMod && !(id === 'closePanel' && s.key === 'Escape')) {
             continue;
@@ -6059,87 +6282,7 @@ img, video, canvas { opacity: 0.9; }
       });
     }
 
-    // ===== Attack Name Dialog (replaces browser prompt) =====
-    function promptAttackMeta(defaultName) {
-      return new Promise((resolve) => {
-        const dialog = $('#attackNameDialog');
-        const nameInput = $('#attackNameInput');
-        const noteInput = $('#attackNoteInput');
-        const btnOk = $('#attackDialogConfirm');
-        const btnCancel = $('#attackDialogCancel');
-        const btnX = $('#attackDialogCancelX');
-        if (!dialog || !nameInput) {
-          resolve({ name: defaultName, note: '', cancelled: false });
-          return;
-        }
-        nameInput.value = defaultName || '';
-        if (noteInput) noteInput.value = '';
-        dialog.classList.add('open');
-        // Always above Payload / other vpanels (payload z can be 500+)
-        panelZCounter = Math.max(panelZCounter || 460, 500) + 50;
-        dialog.style.zIndex = String(Math.max(panelZCounter, 9000));
-        if (vpanelBackdrop) {
-          vpanelBackdrop.classList.add('open');
-          vpanelBackdrop.style.zIndex = String(Math.max(panelZCounter - 1, 8990));
-        }
-        setTimeout(() => { nameInput.focus(); nameInput.select(); }, 50);
-
-        let resolved = false;
-        const onBdClick = (e) => {
-          if (e.target === vpanelBackdrop && dialog.classList.contains('open')) onCancel();
-        };
-        const cleanup = () => {
-          dialog.classList.remove('open');
-          dialog.style.zIndex = '';
-          btnOk.removeEventListener('click', onOk);
-          btnCancel.removeEventListener('click', onCancel);
-          if (btnX) btnX.removeEventListener('click', onCancel);
-          nameInput.removeEventListener('keydown', onKey);
-          if (vpanelBackdrop) vpanelBackdrop.removeEventListener('click', onBdClick);
-        };
-        const restoreBackdropAfterDialog = () => {
-          if (!vpanelBackdrop) return;
-          vpanelBackdrop.style.zIndex = '';
-          // Solo tabs must never stay under a full-page dark veil
-          if (document.body.classList.contains('solo-panel')) {
-            vpanelBackdrop.classList.remove('open');
-            return;
-          }
-          const needBd = Object.keys(VPANEL_MAP || {}).some((k) => {
-            if (k === 'attack-dialog') return false;
-            const el = $(VPANEL_MAP[k]);
-            return !!(el && el.classList.contains('open') && !el.classList.contains('pinned'));
-          });
-          if (needBd) vpanelBackdrop.classList.add('open');
-          else vpanelBackdrop.classList.remove('open');
-        };
-        const onOk = () => {
-          if (resolved) return;
-          resolved = true;
-          const name = (nameInput.value || '').trim() || defaultName;
-          const note = (noteInput && noteInput.value || '').trim();
-          cleanup();
-          restoreBackdropAfterDialog();
-          resolve({ name, note, cancelled: false });
-        };
-        const onCancel = () => {
-          if (resolved) return;
-          resolved = true;
-          cleanup();
-          restoreBackdropAfterDialog();
-          resolve({ name: '', note: '', cancelled: true });
-        };
-        const onKey = (e) => {
-          if (e.key === 'Enter') { e.preventDefault(); onOk(); }
-          if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
-        };
-        btnOk.addEventListener('click', onOk);
-        btnCancel.addEventListener('click', onCancel);
-        if (btnX) btnX.addEventListener('click', onCancel);
-        nameInput.addEventListener('keydown', onKey);
-        if (vpanelBackdrop) vpanelBackdrop.addEventListener('click', onBdClick);
-      });
-    }
+    // promptAttackMeta → static/js/attack.js
 
     // Legacy collapse API → virtual panels
     function setupCollapse() { /* no-op: panels are virtual now */ }
@@ -6277,1059 +6420,10 @@ img, video, canvas { opacity: 0.9; }
       });
     }
 
-    // ===== Brace Expansion (bash-style) =====
-    function expandBraceSegment(seg) {
-      // {1..10} or {01..10} or {a..z} or {1,2,3}
-      if (seg.includes('..')) {
-        const [a, b] = seg.split('..');
-        const start = a.trim();
-        const end = b.trim();
-        // numeric range
-        if (/^-?\d+$/.test(start) && /^-?\d+$/.test(end)) {
-          const s = parseInt(start, 10);
-          const e = parseInt(end, 10);
-          const pad = (start[0] === '0' || end[0] === '0') ? Math.max(start.length, end.length) : 0;
-          const out = [];
-          const step = s <= e ? 1 : -1;
-          for (let i = s; step > 0 ? i <= e : i >= e; i += step) {
-            out.push(pad ? String(i).padStart(pad, '0') : String(i));
-          }
-          return out;
-        }
-        // alpha range (single char)
-        if (start.length === 1 && end.length === 1) {
-          const out = [];
-          const s = start.charCodeAt(0);
-          const e = end.charCodeAt(0);
-          const step = s <= e ? 1 : -1;
-          for (let i = s; step > 0 ? i <= e : i >= e; i += step) {
-            out.push(String.fromCharCode(i));
-          }
-          return out;
-        }
-      }
-      // comma list {1,2,3}
-      return seg.split(',').map(x => x.trim()).filter(Boolean);
-    }
+    // ===== Attack engine → static/js/attack.js (brace, $, runAttack, config UI) =====
+    // Runtime API on window: detectAttackMode, refreshAttackPanel, runAttack, runDollarAttack,
+    // applyPayloadPlaceholders, applySinglePayload, setAttackControls, …
 
-    function expandBraces(str) {
-      const re = /\{([^{}]+)\}/;
-      if (!re.test(str)) return [str];
-      const results = [str];
-      let safety = 0;
-      while (safety++ < 20) {
-        let expanded = false;
-        const next = [];
-        for (const item of results) {
-          const m = item.match(re);
-          if (!m) { next.push(item); continue; }
-          expanded = true;
-          const variants = expandBraceSegment(m[1]);
-          for (const v of variants) {
-            next.push(item.slice(0, m.index) + v + item.slice(m.index + m[0].length));
-          }
-        }
-        results.length = 0;
-        results.push(...next);
-        if (!expanded) break;
-      }
-      return results;
-    }
-
-    function expandAllPayloads() {
-      const lines = (payloadInput.value || '').split('\n').filter(l => l.trim() !== '');
-      if (lines.length === 0) return [];
-      // If any line has braces → batch mode: expand each line, flatten
-      const hasBrace = lines.some(l => /\{[^{}]+\}/.test(l));
-      if (!hasBrace) return lines.map(l => ({ text: l, isBatch: false }));
-      const out = [];
-      for (const line of lines) {
-        const expanded = expandBraces(line);
-        for (const e of expanded) out.push({ text: e, isBatch: true, template: line });
-      }
-      return out;
-    }
-
-    /** $1, $2, … slots inside the payload textarea (nested variable attack). */
-    function applyDollarMap(str, map) {
-      if (!str) return str || '';
-      map = map || {};
-      return String(str).replace(/\$(\d+)/g, (full, num) => {
-        const n = parseInt(num, 10);
-        return Object.prototype.hasOwnProperty.call(map, n) ? String(map[n]) : full;
-      });
-    }
-
-    function detectDollarSlots() {
-      const text = (payloadInput && payloadInput.value) || '';
-      const found = new Set();
-      const re = /\$(\d+)/g;
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        const n = parseInt(m[1], 10);
-        if (n >= 1 && n <= 20) found.add(n);
-      }
-      return [...found].sort((a, b) => a - b);
-    }
-
-    const ATK_SPECIALS = "!@#$%^&*()-_=+[]{}|;:'\",.<>/?`~ \\";
-
-    if (!state.attackSlotConfig) {
-      state.attackSlotConfig = { order: [], slots: {} };
-    }
-
-    function ensureAttackSlotState(detectedSlots) {
-      const cfg = state.attackSlotConfig;
-      if (!cfg.slots) cfg.slots = {};
-      if (!Array.isArray(cfg.order)) cfg.order = [];
-      const detected = (detectedSlots || []).map((n) => +n).filter((n) => n >= 1);
-      // Normalize prior order to numbers and drop removed slots
-      cfg.order = cfg.order.map((n) => +n).filter((n) => detected.includes(n));
-      detected.forEach((n) => {
-        if (!cfg.order.includes(n)) cfg.order.push(n);
-        if (!cfg.slots[n]) {
-          cfg.slots[n] = {
-            segments: [{ type: 'range', from: '1', to: '10' }],
-            stop: null,
-          };
-        }
-      });
-      Object.keys(cfg.slots).forEach((k) => {
-        if (!detected.includes(+k)) delete cfg.slots[k];
-      });
-      return cfg;
-    }
-
-    function expandRangeBounds(from, to) {
-      const a = String(from ?? '').trim();
-      const b = String(to ?? '').trim();
-      if (!a || !b) return [];
-      // numeric
-      if (/^-?\d+$/.test(a) && /^-?\d+$/.test(b)) {
-        const s = parseInt(a, 10);
-        const e = parseInt(b, 10);
-        const pad = (a[0] === '0' || b[0] === '0') ? Math.max(a.length, b.length) : 0;
-        const out = [];
-        const step = s <= e ? 1 : -1;
-        const limit = 10000;
-        let n = 0;
-        for (let i = s; step > 0 ? i <= e : i >= e; i += step) {
-          out.push(pad ? String(i).padStart(pad, '0') : String(i));
-          if (++n >= limit) break;
-        }
-        return out;
-      }
-      // single-char alpha / any codepoint
-      if (a.length === 1 && b.length === 1) {
-        const s = a.charCodeAt(0);
-        const e = b.charCodeAt(0);
-        const out = [];
-        const step = s <= e ? 1 : -1;
-        for (let i = s; step > 0 ? i <= e : i >= e; i += step) {
-          out.push(String.fromCharCode(i));
-        }
-        return out;
-      }
-      return [];
-    }
-
-    /** Expand one scope segment → list of string values */
-    function expandScopeSegment(seg) {
-      if (!seg) return [];
-      if (seg.type === 'specials') return ATK_SPECIALS.split('');
-      if (seg.type === 'list') {
-        return String(seg.values || '')
-          .split(',')
-          .map((x) => x.trim())
-          .filter((x) => x.length > 0);
-      }
-      if (seg.type === 'range') {
-        return expandRangeBounds(seg.from, seg.to);
-      }
-      if (seg.type === 'expr') {
-        return expandScopeExpression(seg.expr || '');
-      }
-      return [];
-    }
-
-    /**
-     * Parse brace expressions into ordered value lists (concatenated).
-     * {1..30} {a..z} {A..F} {#..#} {admin,root,1}
-     */
-    function expandScopeExpression(src) {
-      const text = String(src || '');
-      const re = /\{([^{}]*)\}/g;
-      const parts = [];
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        parts.push(m[1]);
-      }
-      if (!parts.length) {
-        // bare comma list without braces
-        if (text.includes(',')) {
-          return text.split(',').map((x) => x.trim()).filter(Boolean);
-        }
-        return text.trim() ? [text.trim()] : [];
-      }
-      let out = [];
-      parts.forEach((inner) => {
-        const t = inner.trim();
-        if (t === '#..#' || t === '#' || t.toLowerCase() === 'special' || t.toLowerCase() === 'specials') {
-          out = out.concat(ATK_SPECIALS.split(''));
-          return;
-        }
-        if (t.includes('..')) {
-          const [a, b] = t.split('..');
-          out = out.concat(expandRangeBounds(a, b));
-          return;
-        }
-        // comma list
-        out = out.concat(t.split(',').map((x) => x.trim()).filter(Boolean));
-      });
-      return out;
-    }
-
-    function parseExprToSegments(src) {
-      const text = String(src || '');
-      const re = /\{([^{}]*)\}/g;
-      const segs = [];
-      let m;
-      while ((m = re.exec(text)) !== null) {
-        const t = m[1].trim();
-        if (t === '#..#' || t === '#' || t.toLowerCase() === 'specials' || t.toLowerCase() === 'special') {
-          segs.push({ type: 'specials' });
-        } else if (t.includes('..')) {
-          const [a, b] = t.split('..');
-          segs.push({ type: 'range', from: (a || '').trim(), to: (b || '').trim() });
-        } else {
-          segs.push({ type: 'list', values: t });
-        }
-      }
-      return segs;
-    }
-
-    function valuesForSlot(n) {
-      const cfg = state.attackSlotConfig.slots[n];
-      if (!cfg || !cfg.segments || !cfg.segments.length) return [];
-      let out = [];
-      cfg.segments.forEach((seg) => {
-        out = out.concat(expandScopeSegment(seg));
-      });
-      // de-dupe preserve order
-      const seen = new Set();
-      return out.filter((v) => {
-        if (seen.has(v)) return false;
-        seen.add(v);
-        return true;
-      });
-    }
-
-    function summarizeSlot(n) {
-      const vals = valuesForSlot(n);
-      const cfg = state.attackSlotConfig.slots[n];
-      const segs = (cfg && cfg.segments) || [];
-      const bits = segs.slice(0, 3).map((s) => {
-        if (s.type === 'specials') return '{#..#}';
-        if (s.type === 'range') return `{${s.from}..${s.to}}`;
-        if (s.type === 'list') return `{${String(s.values || '').slice(0, 16)}}`;
-        return '?';
-      });
-      return {
-        count: vals.length,
-        label: bits.join(' + ') + (segs.length > 3 ? '…' : ''),
-        hasStop: !!(cfg && cfg.stop && slotStopEnabled(cfg.stop)),
-      };
-    }
-
-    function slotStopEnabled(stop) {
-      if (!stop) return false;
-      return !!(stop.body || stop.url || stop.time || stop.size || stop.status || stop.sizeDiff || stop.header || stop.title);
-    }
-
-    function estimateDollarCombos(slotsOrder) {
-      let total = 1;
-      for (const n of slotsOrder) {
-        const c = valuesForSlot(n).length;
-        total *= Math.max(1, c);
-        if (total > 1e9) return total;
-      }
-      return total;
-    }
-
-    function renderDollarSlotsUI(detectedSlots) {
-      const box = $('#atkDollarSlots');
-      if (!box) return;
-      if (!detectedSlots || !detectedSlots.length) {
-        box.innerHTML = '';
-        box.hidden = true;
-        return;
-      }
-      box.hidden = false;
-      const cfg = ensureAttackSlotState(detectedSlots);
-      const order = cfg.order.slice();
-      box.innerHTML = order.map((n, idx) => {
-        const sum = summarizeSlot(n);
-        const depth = idx === 0 ? 'outer' : (idx === order.length - 1 ? 'inner' : 'mid');
-        return `<div class="atk-loop-row" draggable="true" data-slot="${n}">
-          <span class="atk-loop-grip" title="Drag to reorder">⠿</span>
-          <span class="atk-loop-name">$${n}</span>
-          <span class="atk-slot-depth">${depth}</span>
-          <span class="atk-loop-summary" title="${escapeHtml(sum.label)}">${escapeHtml(sum.label || 'no scope')}</span>
-          <span class="atk-slot-count">${sum.count}</span>
-          <button type="button" class="btn btn-sm atk-loop-scope" data-slot="${n}">Scope</button>
-          <button type="button" class="btn btn-sm atk-loop-stop${sum.hasStop ? ' has-stop' : ''}" data-slot="${n}">Stop</button>
-        </div>`;
-      }).join('');
-
-      // Drag reorder
-      let dragN = null;
-      box.querySelectorAll('.atk-loop-row').forEach((row) => {
-        row.addEventListener('dragstart', (e) => {
-          dragN = +row.dataset.slot;
-          row.classList.add('dragging');
-          e.dataTransfer.effectAllowed = 'move';
-        });
-        row.addEventListener('dragend', () => {
-          row.classList.remove('dragging');
-          dragN = null;
-        });
-        row.addEventListener('dragover', (e) => {
-          e.preventDefault();
-          row.classList.add('drag-over');
-        });
-        row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
-        row.addEventListener('drop', (e) => {
-          e.preventDefault();
-          row.classList.remove('drag-over');
-          const target = +row.dataset.slot;
-          if (dragN == null || dragN === target) return;
-          const ord = state.attackSlotConfig.order;
-          const from = ord.indexOf(dragN);
-          const to = ord.indexOf(target);
-          if (from < 0 || to < 0) return;
-          ord.splice(from, 1);
-          ord.splice(to, 0, dragN);
-          state.attackComboList = null;
-          renderDollarSlotsUI(detectedSlots);
-          refreshAttackPanelCounts();
-        });
-        row.querySelector('.atk-loop-scope')?.addEventListener('click', (e) => {
-          e.stopPropagation();
-          openAttackScopeEditor(+row.dataset.slot);
-        });
-        row.querySelector('.atk-loop-stop')?.addEventListener('click', (e) => {
-          e.stopPropagation();
-          openAttackSlotStop(+row.dataset.slot);
-        });
-      });
-    }
-
-    function refreshAttackPanelCounts() {
-      const mode = detectAttackMode();
-      if (!attackExpandCount) return;
-      if (mode.mode === 'dollar') {
-        const order = state.attackSlotConfig.order || mode.slots;
-        const n = estimateDollarCombos(order);
-        attackExpandCount.textContent = n > 1000000 ? `~${(n / 1e6).toFixed(1)}M` : String(n);
-      } else if (mode.payloads) {
-        attackExpandCount.textContent = `${mode.payloads.length} payloads`;
-      }
-    }
-
-    // ---- Scope editor ----
-    let _scopeEditSlot = null;
-    let _scopeEditSegments = [];
-
-    function openAttackScopeEditor(n) {
-      _scopeEditSlot = n;
-      const cfg = ensureAttackSlotState(detectDollarSlots()).slots[n] || { segments: [] };
-      _scopeEditSegments = JSON.parse(JSON.stringify(cfg.segments || []));
-      const title = $('#attackScopeTitle');
-      if (title) title.textContent = `$${n} Scope`;
-      const expr = $('#atkScopeExpr');
-      if (expr) expr.value = '';
-      renderScopeSegmentsEditor();
-      if (typeof openVPanel === 'function') openVPanel('attack-scope');
-      else $('#attackScopePanel')?.classList.add('open');
-    }
-
-    function renderScopeSegmentsEditor() {
-      const box = $('#atkScopeSegments');
-      if (!box) return;
-      if (!_scopeEditSegments.length) {
-        box.innerHTML = '<div class="adv-hint">No segments — add a range, specials, or list.</div>';
-      } else {
-        box.innerHTML = _scopeEditSegments.map((seg, i) => {
-          if (seg.type === 'specials') {
-            return `<div class="atk-seg-row" data-i="${i}">
-              <span class="atk-seg-label">{#..#} specials</span>
-              <span class="atk-slot-count">${ATK_SPECIALS.length}</span>
-              <button type="button" class="btn btn-sm btn-ghost atk-seg-del" data-i="${i}">✕</button>
-            </div>`;
-          }
-          if (seg.type === 'range') {
-            return `<div class="atk-seg-row" data-i="${i}">
-              <span class="atk-seg-label">Range</span>
-              <input type="text" class="atk-seg-from" data-i="${i}" value="${escapeHtml(seg.from || '')}" placeholder="from" spellcheck="false" />
-              <span>.. </span>
-              <input type="text" class="atk-seg-to" data-i="${i}" value="${escapeHtml(seg.to || '')}" placeholder="to" spellcheck="false" />
-              <span class="atk-slot-count">${expandRangeBounds(seg.from, seg.to).length}</span>
-              <button type="button" class="btn btn-sm btn-ghost atk-seg-del" data-i="${i}">✕</button>
-            </div>`;
-          }
-          // list
-          return `<div class="atk-seg-row" data-i="${i}">
-            <span class="atk-seg-label">List</span>
-            <input type="text" class="atk-seg-list" data-i="${i}" value="${escapeHtml(seg.values || '')}" placeholder="a,b,c" spellcheck="false" style="flex:1;" />
-            <button type="button" class="btn btn-sm btn-ghost atk-seg-del" data-i="${i}">✕</button>
-          </div>`;
-        }).join('');
-      }
-      box.querySelectorAll('.atk-seg-del').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          _scopeEditSegments.splice(+btn.dataset.i, 1);
-          renderScopeSegmentsEditor();
-        });
-      });
-      box.querySelectorAll('.atk-seg-from').forEach((inp) => {
-        inp.addEventListener('input', () => {
-          _scopeEditSegments[+inp.dataset.i].from = inp.value;
-          renderScopePreviewOnly();
-        });
-      });
-      box.querySelectorAll('.atk-seg-to').forEach((inp) => {
-        inp.addEventListener('input', () => {
-          _scopeEditSegments[+inp.dataset.i].to = inp.value;
-          renderScopePreviewOnly();
-        });
-      });
-      box.querySelectorAll('.atk-seg-list').forEach((inp) => {
-        inp.addEventListener('input', () => {
-          _scopeEditSegments[+inp.dataset.i].values = inp.value;
-          renderScopePreviewOnly();
-        });
-      });
-      renderScopePreviewOnly();
-    }
-
-    function renderScopePreviewOnly() {
-      let vals = [];
-      _scopeEditSegments.forEach((seg) => { vals = vals.concat(expandScopeSegment(seg)); });
-      const seen = new Set();
-      vals = vals.filter((v) => { if (seen.has(v)) return false; seen.add(v); return true; });
-      const countEl = $('#atkScopePreviewCount');
-      if (countEl) countEl.textContent = String(vals.length);
-      const prev = $('#atkScopePreview');
-      if (prev) {
-        const show = vals.slice(0, 40);
-        prev.innerHTML = show.map((v) => `<code>${escapeHtml(v)}</code>`).join(' ')
-          + (vals.length > 40 ? ` <span class="atk-mode-hint">+${vals.length - 40} more</span>` : '');
-      }
-    }
-
-    function bindAttackScopeUI() {
-      function addSeg(seg) {
-        if (!Array.isArray(_scopeEditSegments)) _scopeEditSegments = [];
-        _scopeEditSegments.push(seg);
-        renderScopeSegmentsEditor();
-      }
-      $('#atkScopeAddRange')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        addSeg({ type: 'range', from: '1', to: '10' });
-      });
-      $('#atkScopeAddSpecials')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        addSeg({ type: 'specials' });
-      });
-      $('#atkScopeAddList')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        addSeg({ type: 'list', values: '' });
-      });
-      function doParseExpr() {
-        const expr = ($('#atkScopeExpr')?.value || '').trim();
-        if (!expr) { showToast('Expression is empty'); return; }
-        let segs = parseExprToSegments(expr);
-        // fallback: bare "1..20" or "a,b,c" without braces
-        if (!segs.length && expr.includes('..')) {
-          const [a, b] = expr.split('..');
-          segs = [{ type: 'range', from: (a || '').trim(), to: (b || '').trim() }];
-        }
-        if (!segs.length && expr.includes(',')) {
-          segs = [{ type: 'list', values: expr }];
-        }
-        if (!segs.length) {
-          showToast('Nothing detected — use {1..20} or {a..z} or {a,b,c}');
-          return;
-        }
-        _scopeEditSegments = segs;
-        renderScopeSegmentsEditor();
-        showToast(`Parsed ${segs.length} segment(s)`, 'success');
-      }
-      $('#atkScopeParseExpr')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        doParseExpr();
-      });
-      $('#atkScopeExpr')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          doParseExpr();
-        }
-      });
-      $('#atkScopeSaveBtn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (_scopeEditSlot == null) return;
-        const n = _scopeEditSlot;
-        ensureAttackSlotState(detectDollarSlots());
-        state.attackSlotConfig.slots[n].segments = JSON.parse(JSON.stringify(_scopeEditSegments));
-        state.attackComboList = null; // scopes changed → rebuild combos
-        if (typeof closeVPanel === 'function') closeVPanel('attack-scope');
-        else $('#attackScopePanel')?.classList.remove('open');
-        renderDollarSlotsUI(detectDollarSlots());
-        refreshAttackPanelCounts();
-        showToast(`$${n} scope saved`, 'success');
-      });
-    }
-
-    // ---- Per-slot stop ----
-    let _stopEditSlot = null;
-
-    function openAttackSlotStop(n) {
-      _stopEditSlot = n;
-      const title = $('#attackSlotStopTitle');
-      if (title) title.textContent = `$${n} Stop`;
-      const cfg = ensureAttackSlotState(detectDollarSlots()).slots[n] || {};
-      const stop = cfg.stop || {};
-      const set = (id, val, isCheck) => {
-        const el = $(id);
-        if (!el) return;
-        if (isCheck) el.checked = !!val;
-        else el.value = val != null ? val : '';
-      };
-      set('#slotStopBody', stop.body, true);
-      set('#slotStopBodyVal', stop.bodyVal || '');
-      set('#slotStopUrl', stop.url, true);
-      set('#slotStopUrlVal', stop.urlVal || '');
-      set('#slotStopTime', stop.time, true);
-      set('#slotStopTimeVal', stop.timeVal != null ? stop.timeVal : '');
-      set('#slotStopStatus', stop.status, true);
-      set('#slotStopStatusVal', stop.statusVal || '');
-      set('#slotStopSize', stop.size, true);
-      set('#slotStopSizeOp', stop.sizeOp || 'gt');
-      set('#slotStopSizeVal', stop.sizeVal != null ? stop.sizeVal : '');
-      set('#slotStopSizeDiff', stop.sizeDiff, true);
-      set('#slotStopSizeDiffVal', stop.sizeDiffVal != null ? stop.sizeDiffVal : '50');
-      set('#slotStopHeader', stop.header, true);
-      set('#slotStopHeaderVal', stop.headerVal || '');
-      set('#slotStopTitle', stop.title, true);
-      set('#slotStopTitleVal', stop.titleVal || '');
-      if (typeof openVPanel === 'function') openVPanel('attack-slot-stop');
-      else $('#attackSlotStopPanel')?.classList.add('open');
-    }
-
-    function readSlotStopForm() {
-      return {
-        body: !!$('#slotStopBody')?.checked,
-        bodyVal: $('#slotStopBodyVal')?.value || '',
-        url: !!$('#slotStopUrl')?.checked,
-        urlVal: $('#slotStopUrlVal')?.value || '',
-        time: !!$('#slotStopTime')?.checked,
-        timeVal: +($('#slotStopTimeVal')?.value || 0),
-        status: !!$('#slotStopStatus')?.checked,
-        statusVal: $('#slotStopStatusVal')?.value || '',
-        size: !!$('#slotStopSize')?.checked,
-        sizeOp: $('#slotStopSizeOp')?.value || 'gt',
-        sizeVal: +($('#slotStopSizeVal')?.value || 0),
-        sizeDiff: !!$('#slotStopSizeDiff')?.checked,
-        sizeDiffVal: +($('#slotStopSizeDiffVal')?.value || 50),
-        header: !!$('#slotStopHeader')?.checked,
-        headerVal: $('#slotStopHeaderVal')?.value || '',
-        title: !!$('#slotStopTitle')?.checked,
-        titleVal: $('#slotStopTitleVal')?.value || '',
-      };
-    }
-
-    function shouldStopSlot(entry, stop, baselineSize) {
-      if (!stop || !slotStopEnabled(stop)) return false;
-      const checks = [];
-      const body = entry.response?.body || '';
-      const respStatus = entry.response?.status;
-
-      function testRegex(raw, hay) {
-        if (!raw) return false;
-        const inv = raw.startsWith('!');
-        const pat = inv ? raw.slice(1) : raw;
-        try {
-          const re = new RegExp(pat, 'i');
-          const hit = re.test(hay || '');
-          return inv ? !hit : hit;
-        } catch {
-          return false;
-        }
-      }
-
-      if (stop.body && stop.bodyVal) checks.push(testRegex(stop.bodyVal, body));
-      if (stop.url && stop.urlVal) checks.push(testRegex(stop.urlVal, entry.url || ''));
-      if (stop.time) checks.push((entry.response?.timeMs || 0) >= (stop.timeVal || 0));
-
-      if (stop.status && stop.statusVal) {
-        const raw = String(stop.statusVal).trim();
-        const inv = raw.startsWith('!');
-        const list = (inv ? raw.slice(1) : raw).split(/[,\s]+/).map((x) => x.trim()).filter(Boolean);
-        const hit = list.some((c) => String(respStatus) === c);
-        checks.push(inv ? !hit : hit);
-      }
-
-      if (stop.size) {
-        const sz = body.length;
-        const v = stop.sizeVal || 0;
-        if (stop.sizeOp === 'lt') checks.push(sz <= v);
-        else if (stop.sizeOp === 'eq') checks.push(sz === v);
-        else checks.push(sz >= v);
-      }
-
-      if (stop.sizeDiff && baselineSize != null) {
-        const delta = Math.abs(body.length - baselineSize);
-        checks.push(delta >= (stop.sizeDiffVal || 0));
-      }
-
-      if (stop.header && stop.headerVal) {
-        const hdrs = entry.response?.headers || {};
-        const flat = Object.entries(hdrs).map(([k, v]) => `${k}: ${v}`).join('\n');
-        checks.push(testRegex(stop.headerVal, flat));
-      }
-
-      if (stop.title && stop.titleVal) {
-        let title = '';
-        const mTitle = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-        if (mTitle) title = mTitle[1].replace(/\s+/g, ' ').trim();
-        checks.push(testRegex(stop.titleVal, title));
-      }
-
-      return checks.length > 0 && checks.every(Boolean);
-    }
-
-    function bindAttackSlotStopUI() {
-      $('#slotStopSaveBtn')?.addEventListener('click', () => {
-        if (_stopEditSlot == null) return;
-        const n = _stopEditSlot;
-        ensureAttackSlotState(detectDollarSlots());
-        state.attackSlotConfig.slots[n].stop = readSlotStopForm();
-        if (typeof closeVPanel === 'function') closeVPanel('attack-slot-stop');
-        else $('#attackSlotStopPanel')?.classList.remove('open');
-        renderDollarSlotsUI(detectDollarSlots());
-        showToast(`$${n} stop saved`, 'success');
-      });
-      $('#slotStopClear')?.addEventListener('click', () => {
-        ['#slotStopBody', '#slotStopUrl', '#slotStopTime', '#slotStopStatus', '#slotStopSize', '#slotStopSizeDiff', '#slotStopHeader', '#slotStopTitle'].forEach((id) => {
-          const el = $(id); if (el) el.checked = false;
-        });
-      });
-    }
-
-
-    // ---- Combinations viewer (search / edit / delete) ----
-    const ATK_COMBOS_UI_CAP = 8000;
-
-    function materializeAttackCombos() {
-      const slots = detectDollarSlots();
-      ensureAttackSlotState(slots);
-      const order = (state.attackSlotConfig.order || slots).slice();
-      const domains = order.map((n) => ({ n, values: valuesForSlot(n) }));
-      if (domains.some((d) => !d.values.length)) return [];
-      let total = 1;
-      domains.forEach((d) => { total *= d.values.length; });
-      if (total > ATK_COMBOS_UI_CAP) {
-        showToast(`Showing first ${ATK_COMBOS_UI_CAP} of ${total} combos`);
-      }
-      const out = [];
-      function rec(level, map) {
-        if (out.length >= ATK_COMBOS_UI_CAP) return;
-        if (level >= domains.length) {
-          const m = { ...map };
-          const payload = applyDollarMap((payloadInput.value || '').trim(), m);
-          out.push({ id: out.length + 1, map: m, payload });
-          return;
-        }
-        const d = domains[level];
-        for (let i = 0; i < d.values.length; i++) {
-          if (out.length >= ATK_COMBOS_UI_CAP) return;
-          map[d.n] = d.values[i];
-          rec(level + 1, map);
-        }
-      }
-      rec(0, {});
-      return out;
-    }
-
-    function ensureAttackComboList() {
-      if (!Array.isArray(state.attackComboList)) {
-        state.attackComboList = materializeAttackCombos();
-      }
-      return state.attackComboList;
-    }
-
-    function openAttackCombosPanel() {
-      try {
-        ensureAttackComboList();
-        renderAttackCombosList();
-        const panel = $('#attackCombosPanel');
-        if (typeof openVPanel === 'function') {
-          openVPanel('attack-combos');
-        } else if (panel) {
-          panel.classList.add('open');
-        }
-        if (panel) {
-          panel.style.zIndex = String(Math.max((panelZCounter || 500) + 20, 600));
-          panel.style.display = 'flex';
-          panel.style.opacity = '1';
-          panel.style.pointerEvents = 'auto';
-        }
-        if (vpanelBackdrop) {
-          vpanelBackdrop.classList.add('open');
-        }
-      } catch (err) {
-        console.error('[combos] open failed', err);
-        showToast('Combos open failed: ' + (err && err.message ? err.message : err));
-      }
-    }
-
-    function renderAttackCombosList() {
-      const list = ensureAttackComboList();
-      const q = (($('#atkCombosSearch')?.value) || '').trim().toLowerCase();
-      const box = $('#atkCombosList');
-      const countEl = $('#atkCombosCount');
-      if (!box) return;
-      const filtered = !q ? list : list.filter((row) => {
-        const mapStr = Object.entries(row.map).map(([k, v]) => `$${k}=${v}`).join(' ');
-        return (mapStr + ' ' + (row.payload || '')).toLowerCase().includes(q);
-      });
-      if (countEl) countEl.textContent = `${filtered.length}/${list.length}`;
-      if (!filtered.length) {
-        box.innerHTML = '<div class="adv-hint">No combinations</div>';
-        return;
-      }
-      box.innerHTML = filtered.map((row) => {
-        const mapStr = Object.entries(row.map).map(([k, v]) => `$${k}=${escapeHtml(String(v))}`).join(' ');
-        return `<div class="atk-combo-row" data-id="${row.id}">
-          <div class="atk-combo-map">${mapStr}</div>
-          <div class="atk-combo-payload" title="${escapeHtml(row.payload || '')}">${escapeHtml((row.payload || '').slice(0, 80))}</div>
-          <button type="button" class="btn btn-sm btn-ghost atk-combo-edit" data-id="${row.id}">Edit</button>
-          <button type="button" class="btn btn-sm btn-ghost atk-combo-del" data-id="${row.id}">✕</button>
-        </div>`;
-      }).join('');
-      box.querySelectorAll('.atk-combo-del').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const id = +btn.dataset.id;
-          state.attackComboList = ensureAttackComboList().filter((r) => r.id !== id);
-          refreshAttackPanelCountsFromList();
-          renderAttackCombosList();
-        });
-      });
-      box.querySelectorAll('.atk-combo-edit').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const id = +btn.dataset.id;
-          const row = ensureAttackComboList().find((r) => r.id === id);
-          if (!row) return;
-          const keys = Object.keys(row.map).sort((a, b) => +a - +b);
-          const next = {};
-          for (const k of keys) {
-            const v = prompt(`Value for $${k}`, String(row.map[k]));
-            if (v === null) return;
-            next[k] = v;
-          }
-          row.map = next;
-          row.payload = applyDollarMap((payloadInput.value || '').trim(), next);
-          renderAttackCombosList();
-        });
-      });
-    }
-
-    function refreshAttackPanelCountsFromList() {
-      if (attackExpandCount && Array.isArray(state.attackComboList)) {
-        attackExpandCount.textContent = String(state.attackComboList.length);
-      }
-    }
-
-    function bindAttackCombosUI() {
-      if (window.__atkCombosDelegated) return;
-      window.__atkCombosDelegated = true;
-      document.addEventListener('click', (e) => {
-        const openBtn = e.target && e.target.closest && e.target.closest('#atkCombosOpenBtn');
-        if (openBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          openAttackCombosPanel();
-          return;
-        }
-        const resetBtn = e.target && e.target.closest && e.target.closest('#atkCombosReset');
-        if (resetBtn) {
-          e.preventDefault();
-          state.attackComboList = materializeAttackCombos();
-          refreshAttackPanelCountsFromList();
-          renderAttackCombosList();
-          showToast('Combos rebuilt from scopes', 'success');
-        }
-      });
-      document.addEventListener('input', (e) => {
-        if (e.target && e.target.id === 'atkCombosSearch') renderAttackCombosList();
-      });
-    }
-
-
-    function detectAttackMode() {
-      const slots = detectDollarSlots();
-      if (slots.length > 0) {
-        ensureAttackSlotState(slots);
-        return { isBatch: true, mode: 'dollar', slots, payloads: [] };
-      }
-      const payloads = expandAllPayloads();
-      const isBatch = payloads.length > 1 && payloads.some(p => p.isBatch);
-      return { isBatch, mode: isBatch ? 'brace' : 'single', slots: [], payloads };
-    }
-
-    // ===== Autocomplete =====
-    const AC_SUGGESTIONS = [
-      { t: "ORDER BY {1..10}", h: "column count" },
-      { t: "ORDER BY {1..20}-- -", h: "column count" },
-      { t: "UNION SELECT {1..5}", h: "union cols" },
-      { t: "UNION SELECT {1..10}-- -", h: "union cols" },
-      { t: "UNION SELECT NULL{,NULL}", h: "null cols" },
-      { t: "' OR '1'='1", h: "auth bypass" },
-      { t: "' OR 1=1-- -", h: "auth bypass" },
-      { t: "' OR 1=1#", h: "auth bypass" },
-      { t: "admin'--", h: "auth bypass" },
-      { t: "AND SLEEP(5)-- -", h: "time-based" },
-      { t: "AND IF(1=1,SLEEP(5),0)-- -", h: "time-based" },
-      { t: "; WAITFOR DELAY '0:0:5'--", h: "MSSQL time" },
-      { t: "AND EXTRACTVALUE(1,CONCAT(0x7e,version()))", h: "error-based" },
-      { t: "AND UPDATEXML(1,CONCAT(0x7e,database()),1)", h: "error-based" },
-      { t: "UNION SELECT 1,2,database()-- -", h: "enum db" },
-      { t: "UNION SELECT 1,2,version()-- -", h: "enum ver" },
-      { t: "UNION SELECT 1,table_name,3 FROM information_schema.tables-- -", h: "tables" },
-      { t: "AND 1=1-- -", h: "boolean true" },
-      { t: "AND 1=2-- -", h: "boolean false" },
-      { t: "{1..10}", h: "range expand" },
-      { t: "{1,2,3,4,5}", h: "list expand" },
-      { t: "{a..z}", h: "alpha expand" },
-    ];
-
-    const autocompleteBox = $('#autocompleteBox');
-    let acIndex = -1;
-    let acItems = [];
-
-    function getCurrentWord() {
-      const val = payloadInput.value;
-      const pos = payloadInput.selectionStart;
-      // word from start of current line to cursor
-      const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
-      const partial = val.slice(lineStart, pos);
-      return { partial, lineStart, pos };
-    }
-
-    function showAutocomplete() {
-      const { partial } = getCurrentWord();
-      const q = partial.trim().toUpperCase();
-      if (q.length < 1) { autocompleteBox.classList.add('hidden'); return; }
-      acItems = AC_SUGGESTIONS.filter(s =>
-        s.t.toUpperCase().includes(q) || s.h.toUpperCase().includes(q)
-      ).slice(0, 8);
-      if (acItems.length === 0) { autocompleteBox.classList.add('hidden'); return; }
-      acIndex = 0;
-      autocompleteBox.innerHTML = acItems.map((s, i) =>
-        `<div class="ac-item ${i === 0 ? 'active' : ''}" data-idx="${i}">
-          ${escapeHtml(s.t)}<span class="ac-hint">${escapeHtml(s.h)}</span>
-        </div>`
-      ).join('');
-      autocompleteBox.classList.remove('hidden');
-      autocompleteBox.querySelectorAll('.ac-item').forEach(el => {
-        el.addEventListener('mousedown', (e) => {
-          e.preventDefault();
-          applyAutocomplete(+el.dataset.idx);
-        });
-      });
-    }
-
-    function applyAutocomplete(idx) {
-      const item = acItems[idx];
-      if (!item) return;
-      const { lineStart, pos } = getCurrentWord();
-      const val = payloadInput.value;
-      const lineEnd = val.indexOf('\n', pos);
-      const end = lineEnd === -1 ? val.length : lineEnd;
-      payloadInput.value = val.slice(0, lineStart) + item.t + val.slice(end);
-      const newPos = lineStart + item.t.length;
-      payloadInput.setSelectionRange(newPos, newPos);
-      payloadInput.focus();
-      autocompleteBox.classList.add('hidden');
-      refreshAttackPanel();
-    }
-
-    payloadInput.addEventListener('input', () => {
-      showAutocomplete();
-      refreshAttackPanel();
-    });
-    payloadInput.addEventListener('keydown', (e) => {
-      if (autocompleteBox.classList.contains('hidden')) return;
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        acIndex = Math.min(acIndex + 1, acItems.length - 1);
-        autocompleteBox.querySelectorAll('.ac-item').forEach((el, i) => el.classList.toggle('active', i === acIndex));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        acIndex = Math.max(acIndex - 1, 0);
-        autocompleteBox.querySelectorAll('.ac-item').forEach((el, i) => el.classList.toggle('active', i === acIndex));
-      } else if (e.key === 'Enter' || e.key === 'Tab') {
-        if (acIndex >= 0 && acItems[acIndex]) {
-          e.preventDefault();
-          applyAutocomplete(acIndex);
-        }
-      } else if (e.key === 'Escape') {
-        autocompleteBox.classList.add('hidden');
-      }
-    });
-    payloadInput.addEventListener('blur', () => {
-      setTimeout(() => autocompleteBox.classList.add('hidden'), 150);
-    });
-
-    // ===== Attack Panel =====
-    const attackConfigPanel = $('#attackConfigPanel');
-    const attackExpandCount = $('#attackExpandCount');
-    const attackPreview = $('#attackPreview');
-    const urlProgressBar = $('#urlProgressBar');
-    const pauseBtn = $('#pauseBtn');
-    const stopBtn = $('#stopBtn');
-    const attackProgressLabel = $('#attackProgressLabel');
-
-    function syncSendButtonsLabel(isBatch) {
-      const label = isBatch ? 'Start SQLi ATK' : 'Send Request';
-      [sendBtn, $('#payloadSendBtn')].forEach((btn) => {
-        if (!btn) return;
-        const textEl = btn.querySelector('.btn-text');
-        if (textEl) textEl.textContent = label;
-        else btn.textContent = label;
-        btn.classList.toggle('attack-mode', !!isBatch);
-      });
-    }
-
-    function refreshAttackPanel() {
-      const mode = detectAttackMode();
-      const { isBatch, payloads } = mode;
-      const attackBtn = $('#payloadAttackBtn');
-      const hint = $('#atkModeHint');
-      if (isBatch) {
-        if (mode.mode === 'dollar') {
-          renderDollarSlotsUI(mode.slots);
-          if (hint) hint.textContent = 'Top row = outermost loop. Drag to reorder. Scope = {n..m} / {#..#} / list. Stop = advance only that loop.';
-          if (attackExpandCount) {
-            const n = estimateDollarCombos(state.attackSlotConfig.order || mode.slots);
-            attackExpandCount.textContent = n > 1000000 ? `~${(n / 1e6).toFixed(1)}M` : String(n);
-          }
-          if (attackPreview) attackPreview.innerHTML = '';
-        } else {
-          renderDollarSlotsUI([]);
-          if (hint) hint.textContent = 'Brace expansion mode — each {…} list becomes a payload.';
-          if (attackExpandCount) attackExpandCount.textContent = `${payloads.length} payloads`;
-          if (attackPreview) {
-            const preview = payloads.slice(0, 12).map(p => `<span>${escapeHtml(p.text.slice(0, 40))}</span>`).join('');
-            attackPreview.innerHTML = preview + (payloads.length > 12 ? `<span>+${payloads.length - 12} more</span>` : '');
-          }
-        }
-        if (attackBtn) attackBtn.classList.remove('hidden');
-        syncSendButtonsLabel(true);
-      } else {
-        renderDollarSlotsUI([]);
-        if (hint) hint.textContent = 'Use $1, $2… in Payload for nested variable attack, or {1..N} for list expansion.';
-        if (attackBtn) attackBtn.classList.add('hidden');
-        if (attackConfigPanel && attackConfigPanel.classList.contains('open') && typeof closeVPanel === 'function') {
-          closeVPanel('attack-config');
-        }
-        syncSendButtonsLabel(false);
-      }
-    }
-
-    function setProgress(done, total) {
-      const pct = total ? Math.round((done / total) * 100) : 0;
-      if (urlProgressBar) {
-        urlProgressBar.style.width = pct + '%';
-        urlProgressBar.classList.toggle('active', total > 0 && done < total);
-        if (done >= total && total > 0) urlProgressBar.classList.remove('active');
-      }
-      if (attackProgressLabel) {
-        attackProgressLabel.textContent = `${done}/${total} (${pct}%)`;
-        attackProgressLabel.classList.toggle('hidden', total === 0);
-      }
-    }
-
-    function setAttackControls(running) {
-      if (pauseBtn) pauseBtn.classList.toggle('hidden', !running);
-      if (stopBtn) stopBtn.classList.toggle('hidden', !running);
-      document.body.classList.toggle('attack-running', !!running);
-      if (!running) {
-        urlProgressBar.style.width = '0%';
-        urlProgressBar.classList.remove('active');
-        attackProgressLabel.classList.add('hidden');
-        pauseBtn.textContent = 'Pause';
-        state.attack.paused = false;
-        state.attack.stop = false;
-        state.attack.active = false;
-        state._attackLock = false;
-        state.isSending = false;
-        [sendBtn, $('#payloadSendBtn')].forEach((b) => {
-          if (!b) return;
-          b.classList.remove('loading');
-          b.disabled = false;
-        });
-      } else {
-        urlProgressBar.classList.add('active');
-      }
-    }
-
-    pauseBtn.addEventListener('click', () => {
-      if (!state.attack.active) return;
-      state.attack.paused = !state.attack.paused;
-      pauseBtn.textContent = state.attack.paused ? 'Resume' : 'Pause';
-      urlProgressBar?.classList.toggle('active', !state.attack.paused && !state.attack.stop);
-      showToast(state.attack.paused ? 'Attack paused' : 'Attack resumed');
-    });
-    stopBtn.addEventListener('click', () => {
-      if (!state.attack.active) return;
-      state.attack.stop = true;
-      state.attack.paused = false;
-      showToast('Stopping attack…');
-    });
-
-    // ===== Send / Attack =====
-    function applyPayloadPlaceholders(str, linesOverride) {
-      if (!str || !str.includes('$')) return str;
-      const lines = linesOverride || (payloadInput.value || '').split('\n');
-      return str.replace(/\$(\d+)/g, (match, num) => {
-        const idx = parseInt(num, 10) - 1;
-        if (idx >= 0 && idx < lines.length) return lines[idx];
-        return match;
-      });
-    }
-
-    function applySinglePayload(str, payloadText) {
-      // $1 in URL/body → inject this request's resolved payload text
-      // $2+ → other lines from the payload workbench (if any)
-      if (!str) return str;
-      const text = payloadText == null ? '' : String(payloadText);
-      const lines = (payloadInput && payloadInput.value || '').split('\n');
-      return String(str).replace(/\$(\d+)/g, (match, num) => {
-        const idx = parseInt(num, 10) - 1;
-        if (idx === 0) return text;
-        if (idx >= 0 && idx < lines.length) {
-          const expanded = (typeof expandBraces === 'function') ? expandBraces(lines[idx]) : [lines[idx]];
-          return (expanded && expanded[0]) || lines[idx];
-        }
-        return match;
-      });
-    }
 
     async function executeOneRequest(url, method, postBody, customHeaders, payloadText, batchId, batchName, attackIndex, opts) {
       opts = opts || {};
@@ -7424,535 +6518,24 @@ img, video, canvas { opacity: 0.9; }
       return entry;
     }
 
-    function readAttackStopConfig() {
-      const parseStatusList = (str) => {
-        const out = [];
-        String(str || '').split(/[,\s]+/).filter(Boolean).forEach((part) => {
-          const m = part.match(/^(\d{1,3})-(\d{1,3})$/);
-          if (m) out.push([+m[1], +m[2]]);
-          else if (/^\d+$/.test(part)) { const n = +part; out.push([n, n]); }
-        });
-        return out;
-      };
-      return {
-        action: ($('#atkMatchAction')?.value === 'stop') ? 'stop' : 'pause',
-        matchTimes: Math.max(1, Math.min(100, +($('#atkMatchTimes')?.value || 1))),
-        cond2xx: !!$('#atkCond2xx')?.checked,
-        cond3xx: !!$('#atkCond3xx')?.checked,
-        cond4xx: !!$('#atkCond4xx')?.checked,
-        cond5xx: !!$('#atkCond5xx')?.checked,
-        cond0: !!$('#atkCond0')?.checked,
-        condSql: !!$('#atkCondSql')?.checked,
-        condStatus: !!$('#atkCondStatus')?.checked,
-        statusRanges: parseStatusList($('#atkCondStatusVal')?.value),
-        condBody: !!$('#atkCondBody')?.checked,
-        bodyRe: ($('#atkCondBodyVal')?.value || '').trim(),
-        condUrl: !!$('#atkCondUrl')?.checked,
-        urlRe: ($('#atkCondUrlVal')?.value || '').trim(),
-        condTime: !!$('#atkCondTime')?.checked,
-        timeMs: +($('#atkCondTimeVal')?.value || 0),
-        condSize: !!$('#atkCondSize')?.checked,
-        sizeOp: ($('#atkCondSizeOp')?.value || 'gt'),
-        sizeVal: +($('#atkCondSizeVal')?.value || 0),
-        condSizeDiff: !!$('#atkCondSizeDiff')?.checked,
-        sizeDiff: +($('#atkCondSizeDiffVal')?.value || 50),
-      };
-    }
 
-    function attackConditionActive(cfg) {
-      return !!(cfg.cond2xx || cfg.cond3xx || cfg.cond4xx || cfg.cond5xx || cfg.cond0 ||
-        cfg.condSql || cfg.condStatus || cfg.condBody || cfg.condUrl ||
-        cfg.condTime || cfg.condSize || cfg.condSizeDiff);
-    }
 
-    function updateAtkStopSummary() {
-      const el = $('#atkStopSummary');
-      if (!el) return;
-      const cfg = readAttackStopConfig();
-      if (!attackConditionActive(cfg)) {
-        el.textContent = 'No conditions · never auto-pause';
+    function cancelInFlightRequest() {
+      if (state.attack && state.attack.active) {
+        state.attack.stop = true;
+        state.attack.paused = false;
+        showToast('Stopping attack…');
         return;
       }
-      const parts = [];
-      if (cfg.cond2xx) parts.push('2xx');
-      if (cfg.cond3xx) parts.push('3xx');
-      if (cfg.cond4xx) parts.push('4xx');
-      if (cfg.cond5xx) parts.push('5xx');
-      if (cfg.cond0) parts.push('ERR');
-      if (cfg.condSql) parts.push('SQLi-err');
-      if (cfg.condStatus) parts.push('status');
-      if (cfg.condBody) parts.push('body');
-      if (cfg.condUrl) parts.push('url');
-      if (cfg.condTime) parts.push('time');
-      if (cfg.condSize) parts.push('size');
-      if (cfg.condSizeDiff) parts.push('Δsize');
-      el.textContent = `${cfg.action} after ${cfg.matchTimes}× · ${parts.join('+')}`;
-    }
-
-    function shouldStopAttack(entry, cfg, baselineSize) {
-      if (!cfg || !attackConditionActive(cfg)) return false;
-      const st = entry.response.status || 0;
-      const body = entry.response.body || '';
-      const timeMs = entry.response.timeMs || 0;
-      const checks = [];
-      if (cfg.cond2xx) checks.push(st >= 200 && st < 300);
-      if (cfg.cond3xx) checks.push(st >= 300 && st < 400);
-      if (cfg.cond4xx) checks.push(st >= 400 && st < 500);
-      if (cfg.cond5xx) checks.push(st >= 500 && st < 600);
-      if (cfg.cond0) checks.push(st === 0);
-      if (cfg.condSql) {
-        checks.push(/sql syntax|mysql|odbc|ora-\d|postgresql|sqlite|unclosed quotation|sqlstate|you have an error in your sql/i.test(body));
-      }
-      if (cfg.condStatus) {
-        const ranges = cfg.statusRanges || [];
-        checks.push(ranges.some(([a, b]) => st >= a && st <= b));
-      }
-      if (cfg.condBody && cfg.bodyRe) {
-        checks.push(matchPattern(body, cfg.bodyRe));
-      }
-      if (cfg.condUrl && cfg.urlRe) {
-        checks.push(matchPattern(entry.url || '', cfg.urlRe));
-      }
-      if (cfg.condTime) checks.push(timeMs >= (cfg.timeMs || 0));
-      if (cfg.condSize) {
-        const sz = body.length;
-        const n = cfg.sizeVal || 0;
-        if (cfg.sizeOp === 'lt') checks.push(sz <= n);
-        else if (cfg.sizeOp === 'eq') checks.push(sz === n);
-        else checks.push(sz >= n);
-      }
-      if (cfg.condSizeDiff && baselineSize != null) {
-        const sz = body.length;
-        checks.push(Math.abs(sz - baselineSize) >= (cfg.sizeDiff || 0));
-      }
-      // AND across enabled conditions
-      return checks.length > 0 && checks.every(Boolean);
-    }
-
-
-    async function runDollarAttack(slots) {
-      if (state.attack.active || state._attackLock) {
-        showToast('Attack already running');
-        return;
-      }
-
-      try {
-        ensureAttackSlotState(slots);
-        const order = (state.attackSlotConfig.order || slots).map((n) => +n);
-        // Prefer nested domains; only use edited combo list if user opened Combos
-        const useList = Array.isArray(state.attackComboList) && state.attackComboList.length > 0;
-
-        const domains = order.map((n) => ({
-          n: +n,
-          values: valuesForSlot(+n),
-          stop: (state.attackSlotConfig.slots[+n] && state.attackSlotConfig.slots[+n].stop) || null,
-        })).filter((d) => d.values.length > 0);
-
-        if (!useList) {
-          if (!domains.length) {
-            showToast('Configure Scope for each $ (empty domains)');
-            return;
-          }
+      if (state.isSending) {
+        if (state._sendAbort) {
+          try { state._sendAbort.abort(); } catch (e) {}
         }
-
-        state._attackLock = true;
-        state.isSending = true;
-        syncSendButtonsSending(true);
-
-        const defaultName = 'VarAttack ' + new Date().toLocaleTimeString();
-        let meta;
-        try {
-          meta = await promptAttackMeta(defaultName);
-        } catch (e) {
-          console.warn('[dollar-attack] meta dialog error', e);
-          meta = { name: defaultName, note: '', cancelled: false };
-        }
-        if (meta.cancelled) {
-          showToast('Attack cancelled');
-          return;
-        }
-
-        const attackName = meta.name || defaultName;
-        const attackNote = meta.note || '';
-        const method = methodSelect.value;
-        const urlTemplate = (urlInput && urlInput.value || '').trim();
-        if (!urlTemplate) {
-          showToast('Enter a target URL');
-          return;
-        }
-        let postBodyTemplate = postBodyInput ? postBodyInput.value : '';
-        const payloadTemplate = (payloadInput && payloadInput.value || '').trim();
-        const customHeaders = buildRequestHeaders(postBodyTemplate);
-        const delay = Math.max(0, +($('#atkDelay')?.value || 200));
-        const batchId = 'atk-' + Date.now();
-
-        let total = 1;
-        if (useList) total = state.attackComboList.length;
-        else domains.forEach((d) => { total *= d.values.length; });
-
-        state.attack = {
-          active: true, paused: false, stop: false,
-          total, done: 0, batchId, name: attackName, note: attackNote,
-          matchHits: 0, mode: 'dollar',
-        };
-        setAttackControls(true);
-        document.body.classList.add('attack-running');
-        if (!document.body.classList.contains('solo-payload')) {
-          const pw = $('#payloadWorkbench');
-          if (pw && pw.classList.contains('open') && !pw.classList.contains('pinned')) {
-            pw.classList.remove('open');
-          }
-          if (typeof closeVPanel === 'function') {
-            closeVPanel('attack-config');
-            closeVPanel('attack-scope');
-            closeVPanel('attack-slot-stop');
-            closeVPanel('attack-combos');
-          }
-          if (vpanelBackdrop) vpanelBackdrop.classList.remove('open');
-        }
-        setProgress(0, total);
-
-        if (!state.attackSources) state.attackSources = {};
-        state.attackSources[batchId] = {
-          name: attackName,
-          note: attackNote,
-          urlTemplate,
-          payloadText: payloadTemplate,
-          method,
-          postBody: postBodyTemplate,
-          headers: (state.headers || []).map(h => ({ ...h })),
-          atkConfig: {
-            delay,
-            timeout: +($('#atkTimeout')?.value || 15),
-            mode: 'dollar',
-            order,
-            domains: domains.map((d) => ({ n: d.n, count: d.values.length })),
-          },
-        };
-        if (typeof ensureAttackFilterOption === 'function') {
-          ensureAttackFilterOption(batchId, attackName);
-        }
-        state.historyStatusFilter = 'batch:' + batchId;
-        if (historyStatusFilter) historyStatusFilter.value = 'batch:' + batchId;
-
-        let baselineSize = null;
-        let stoppedEarly = false;
-        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-        async function fire(map) {
-          while (state.attack.paused && !state.attack.stop) await sleep(80);
-          if (state.attack.stop) return { status: 'stop' };
-          // 1) Expand attack slots ONLY inside the payload template ($1/$2 in Payload workbench)
-          const payloadText = applyDollarMap(payloadTemplate, map);
-          // 2) URL / body: $1 means "inject the fully-resolved payload" (never slot values).
-          //    Applying applyDollarMap to URL first was the bug — it turned member=$1 into member=1
-          //    using the slot map, so the real SQLi payload never left the workbench.
-          let url = applySinglePayload(urlTemplate, payloadText);
-          let postBody = applySinglePayload(postBodyTemplate, payloadText);
-          if (!url) {
-            console.warn('[dollar-attack] empty url after inject', map);
-            return { status: 'ok' };
-          }
-          if ((urlTemplate.includes('$') || (postBodyTemplate || '').includes('$')) &&
-              url === urlTemplate && !(postBodyTemplate && postBody !== postBodyTemplate)) {
-            // still useful when user forgot $1 — log once
-            if (!state.attack._warnedNoInject) {
-              state.attack._warnedNoInject = true;
-              showToast('URL/Body has no $1 — payload not injected into request', 'error');
-            }
-          }
-          let entry;
-          try {
-            entry = await executeOneRequest(
-              url, method, postBody, customHeaders, payloadText, batchId, attackName, null
-            );
-          } catch (err) {
-            console.error('[dollar-attack] request error', err);
-            entry = {
-              id: state.nextId++,
-              method, url, payload: payloadText,
-              response: { status: 0, statusText: String(err), timeMs: 0, headers: {}, body: String(err) },
-              timestamp: Date.now(),
-            };
-            state.history.unshift(entry);
-          }
-          if (attackNote) entry.note = attackNote;
-          entry.dollarMap = { ...map };
-          state.attack.done++;
-          setProgress(state.attack.done, state.attack.total);
-          state.activeHistoryId = entry.id;
-          const now = Date.now();
-          if (!state.attack._lastUi || now - state.attack._lastUi > 350 || state.attack.paused || state.attack.stop) {
-            state.attack._lastUi = now;
-            try {
-              if (typeof displayResponse === 'function') displayResponse(entry.response, entry.url);
-              if (typeof renderHistory === 'function') renderHistory();
-            } catch (uiErr) {
-              console.warn('[dollar-attack] ui update', uiErr);
-            }
-          }
-          if (baselineSize == null && entry.response && entry.response.status > 0) {
-            baselineSize = (entry.response.body || '').length;
-          }
-          let matchLevel = -1;
-          for (let li = domains.length - 1; li >= 0; li--) {
-            const d = domains[li];
-            if (d.stop && shouldStopSlot(entry, d.stop, baselineSize)) {
-              matchLevel = li;
-              break;
-            }
-          }
-          if (delay > 0 && !state.attack.stop) await sleep(delay);
-          if (matchLevel >= 0) return { status: 'match', level: matchLevel };
-          return { status: 'ok' };
-        }
-
-        async function recurse(level, map) {
-          if (state.attack.stop) return { status: 'stop' };
-          if (level >= domains.length) {
-            return fire({ ...map });
-          }
-          const d = domains[level];
-          for (let i = 0; i < d.values.length; i++) {
-            while (state.attack.paused && !state.attack.stop) await sleep(80);
-            if (state.attack.stop) return { status: 'stop' };
-            map[d.n] = d.values[i];
-            const r = await recurse(level + 1, map);
-            if (!r) continue;
-            if (r.status === 'stop') return r;
-            if (r.status === 'match') {
-              if (r.level < level) return r;
-              if (r.level === level) {
-                showToast(`$${d.n} stop → outer advances`, 'success');
-                break;
-              }
-            }
-          }
-          return { status: 'ok' };
-        }
-
-        console.log('[dollar-attack] start', { total, useList, domains: domains.map(d => ({ n: d.n, c: d.values.length })), order });
-
-        if (useList) {
-          const queue = state.attackComboList.slice();
-          for (let qi = 0; qi < queue.length; qi++) {
-            while (state.attack.paused && !state.attack.stop) await sleep(80);
-            if (state.attack.stop) break;
-            const row = queue[qi];
-            const r = await fire({ ...(row.map || {}) });
-            if (r.status === 'stop') break;
-            if (r.status === 'match' && r.level >= 0 && domains[r.level]) {
-              const outerKeys = domains.slice(0, r.level + 1).map((d) => d.n);
-              while (qi + 1 < queue.length) {
-                const next = queue[qi + 1];
-                const same = outerKeys.every((k) => String((next.map || {})[k]) === String((row.map || {})[k]));
-                if (!same) break;
-                qi++;
-              }
-            }
-          }
-        } else {
-          await recurse(0, {});
-        }
-
-        showToast(
-          stoppedEarly || state.attack.stop
-            ? `Attack stopped — ${state.attack.done}/${state.attack.total}`
-            : `Attack complete — ${state.attack.done}/${state.attack.total}`,
-          'success'
-        );
-      } catch (err) {
-        console.error('[dollar-attack] fatal', err);
-        showToast('Attack error: ' + (err && err.message ? err.message : String(err)));
-      } finally {
+        state._sendAbort = null;
         state.isSending = false;
-        state._attackLock = false;
-        syncSendButtonsSending(false);
-        setAttackControls(false);
-        try { renderHistory(); } catch (_) {}
-        if (typeof setPayloadCollapsed === 'function') setPayloadCollapsed(true);
+        if (typeof syncSendButtonsSending === 'function') syncSendButtonsSending(false);
+        showToast('Request cancelled', 'success');
       }
-    }
-
-    async function runAttack(payloads) {
-
-
-
-      // Guard against double-start (dialog wait used to leave isSending=false)
-      if (state.attack.active || state._attackLock) return;
-      state._attackLock = true;
-      state.isSending = true;
-      [sendBtn, $('#payloadSendBtn')].forEach((b) => {
-        if (!b) return;
-        b.classList.add('loading');
-        b.disabled = true;
-      });
-
-      // Custom modal instead of browser prompt
-      const defaultName = 'Attack ' + new Date().toLocaleTimeString();
-      let meta;
-      try {
-        meta = await promptAttackMeta(defaultName);
-      } catch (e) {
-        state._attackLock = false;
-        state.isSending = false;
-        [sendBtn, $('#payloadSendBtn')].forEach((b) => {
-          if (!b) return;
-          b.classList.remove('loading');
-          b.disabled = false;
-        });
-        return;
-      }
-      if (meta.cancelled) {
-        state._attackLock = false;
-        state.isSending = false;
-        [sendBtn, $('#payloadSendBtn')].forEach((b) => {
-          if (!b) return;
-          b.classList.remove('loading');
-          b.disabled = false;
-        });
-        showToast('Attack cancelled');
-        return;
-      }
-      const attackName = meta.name || defaultName;
-      const attackNote = meta.note || '';
-
-      const method = methodSelect.value;
-      const urlTemplate = urlInput.value.trim();
-      let postBodyTemplate = postBodyInput ? postBodyInput.value : '';
-      const customHeaders = buildRequestHeaders(postBodyTemplate);
-      const threads = Math.max(1, Math.min(50, +($('#atkThreads')?.value || 3)));
-      const delay = Math.max(0, +($('#atkDelay')?.value || 200));
-      const stopCfg = readAttackStopConfig();
-      const batchId = 'atk-' + Date.now();
-
-      state.attack = {
-        active: true, paused: false, stop: false,
-        total: payloads.length, done: 0, batchId, payloads, name: attackName, note: attackNote,
-        matchHits: 0,
-        stopCfg,
-      };
-      // Do NOT disable entire chrome; pause/stop must stay clickable
-      setAttackControls(true);
-      document.body.classList.add('attack-running');
-      // Keep Payload open in solo; on main close non-pinned payload so dialog/backdrop don't trap UI
-      if (!document.body.classList.contains('solo-payload')) {
-        const pw = $('#payloadWorkbench');
-        if (pw && pw.classList.contains('open') && !pw.classList.contains('pinned')) {
-          pw.classList.remove('open');
-        }
-        if (typeof closeVPanel === 'function') closeVPanel('attack-config');
-        if (vpanelBackdrop) vpanelBackdrop.classList.remove('open');
-      }
-      setProgress(0, payloads.length);
-
-      // Save full attack source so it can be restored later
-      state.attackSources[batchId] = {
-        name: attackName,
-        note: attackNote,
-        urlTemplate,
-        payloadText: payloadInput.value,
-        method,
-        postBody: postBodyTemplate,
-        headers: state.headers.map(h => ({ ...h })),
-        atkConfig: {
-          threads,
-          delay,
-          timeout: +($('#atkTimeout')?.value || 15),
-          stopCfg,
-        },
-      };
-
-      // Register filter option for this attack name
-      ensureAttackFilterOption(batchId, attackName);
-      state.historyStatusFilter = 'batch:' + batchId;
-      if (historyStatusFilter) historyStatusFilter.value = 'batch:' + batchId;
-
-      let baselineSize = null;
-      // One queue entry per payload index — workers only shift once (no double-send)
-      const queue = payloads.map((p, i) => ({ ...p, attackIndex: i }));
-      let stoppedEarly = false;
-      const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-      const processOne = async (p) => {
-        if (state.attack.stop) return;
-        const url = applySinglePayload(urlTemplate, p.text);
-        const postBody = applySinglePayload(postBodyTemplate, p.text);
-        const entry = await executeOneRequest(
-          url, method, postBody, customHeaders, p.text, batchId, attackName, p.attackIndex
-        );
-        if (attackNote) entry.note = attackNote;
-        state.attack.done++;
-        setProgress(state.attack.done, state.attack.total);
-        state.activeHistoryId = entry.id;
-
-        const now = Date.now();
-        if (!state.attack._lastUi || now - state.attack._lastUi > 350 || state.attack.paused || state.attack.stop) {
-          state.attack._lastUi = now;
-          if (typeof displayResponse === 'function') displayResponse(entry.response, entry.url);
-          if (typeof renderHistory === 'function') renderHistory();
-        }
-
-        if (baselineSize == null && entry.response.status > 0) {
-          baselineSize = (entry.response.body || '').length;
-        }
-        if (!state.attack.stop && shouldStopAttack(entry, stopCfg, baselineSize)) {
-          state.attack.matchHits = (state.attack.matchHits || 0) + 1;
-          if (state.attack.matchHits >= (stopCfg.matchTimes || 1)) {
-            queue.length = 0;
-            if (stopCfg.action === 'stop') {
-              state.attack.stop = true;
-              stoppedEarly = true;
-              urlProgressBar?.classList.remove('active');
-              showToast(`Stop condition met (${state.attack.matchHits}×): ${p.text.slice(0, 40)}`);
-            } else {
-              state.attack.paused = true;
-              if (pauseBtn) pauseBtn.textContent = 'Resume';
-              urlProgressBar?.classList.remove('active');
-              showToast(`Pause condition met (${state.attack.matchHits}×): ${p.text.slice(0, 40)}`);
-            }
-          }
-        }
-        if (delay > 0 && !state.attack.stop) await sleep(delay);
-      };
-
-      // Worker pool: each worker pulls next item; an item is never processed twice
-      const worker = async () => {
-        while (!state.attack.stop) {
-          while (state.attack.paused && !state.attack.stop) await sleep(80);
-          if (state.attack.stop) break;
-          const p = queue.shift();
-          if (!p) break;
-          try {
-            await processOne(p);
-          } catch (err) {
-            console.warn('[attack] worker error', err);
-            state.attack.done++;
-            setProgress(state.attack.done, state.attack.total);
-          }
-        }
-      };
-
-      const nWorkers = Math.max(1, Math.min(threads, payloads.length));
-      await Promise.all(Array.from({ length: nWorkers }, () => worker()));
-      if (state.attack.stop) stoppedEarly = true;
-
-      state.isSending = false;
-      state._attackLock = false;
-      [sendBtn, $('#payloadSendBtn')].forEach((b) => {
-        if (!b) return;
-        b.classList.remove('loading');
-        b.disabled = false;
-      });
-      setAttackControls(false);
-      renderHistory();
-      if (typeof setPayloadCollapsed === 'function') setPayloadCollapsed(true);
-      showToast(
-        stoppedEarly
-          ? `Attack stopped — ${state.attack.done}/${state.attack.total}`
-          : `Attack complete — ${state.attack.done}/${state.attack.total}`,
-        'success'
-      );
     }
 
     async function sendRequest() {
@@ -8090,83 +6673,30 @@ img, video, canvas { opacity: 0.9; }
       else attackConfigPanel?.classList.add('open');
     });
     document.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      if (e.key !== 'Enter') return;
+      // Ctrl/Cmd+Enter → cancel in-flight / stop attack
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        cancelInFlightRequest();
+        return;
+      }
+      // Plain Enter → send, only when focus is on URL (payload textarea needs newline)
+      const t = e.target;
+      if (t && (t.id === 'urlInput' || t.classList.contains('url-input'))) {
         e.preventDefault();
         sendRequest();
       }
     });
 
-    // ===== Tools tabs + Proxy manager =====
-    const PROXY_LS_KEY = 'sqli-workbench-proxies-v1';
-    let proxyState = {
-      items: [],       // { id, url, note, pinned, bytesIn, bytesOut, lastPingMs, lastPingOk, lastPingAt }
-      activeId: null,
-    };
-    let proxyPingTimer = null;
-
-    function apiBaseUrl() {
-      return (window.location.port === '5000') ? '' : 'http://127.0.0.1:5000';
-    }
-
-    function loadProxyState() {
-      try {
-        const raw = localStorage.getItem(PROXY_LS_KEY);
-        if (!raw) return;
-        const data = JSON.parse(raw);
-        if (data && Array.isArray(data.items)) {
-          proxyState.items = data.items;
-          proxyState.activeId = data.activeId || null;
-        }
-      } catch { /* ignore */ }
-    }
-
-    function saveProxyState() {
-      try {
-        localStorage.setItem(PROXY_LS_KEY, JSON.stringify({
-          items: proxyState.items,
-          activeId: proxyState.activeId,
-        }));
-      } catch { /* ignore */ }
-    }
-
-    function formatBytes(n) {
-      n = Math.max(0, Number(n) || 0);
-      if (n < 1024) return n + ' B';
-      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
-      return (n / (1024 * 1024)).toFixed(2) + ' MB';
-    }
-
-    function getActiveProxy() {
-      if (!proxyState.activeId) return null;
-      return proxyState.items.find((p) => p.id === proxyState.activeId) || null;
-    }
-
-    function getActiveProxyUrl() {
-      const p = getActiveProxy();
-      return p ? p.url : '';
-    }
-
-    function applyServerProxyStats(stats) {
-      if (!stats || !stats.proxy) return;
-      const item = proxyState.items.find((p) => p.url === stats.proxy);
-      if (!item) return;
-      if (typeof stats.bytes_sent === 'number') item.bytesOut = stats.bytes_sent;
-      if (typeof stats.bytes_recv === 'number') item.bytesIn = stats.bytes_recv;
-      saveProxyState();
-      updateProxyToolbar();
-      renderProxyList();
-    }
-
     /** Open a tool panel from the Tools picker: close picker, open float panel */
     function openToolFromPicker(toolName) {
       if (!VPANEL_MAP[toolName]) return;
-      // Close tools list drawer without unpinning other pinned tools
       const toolsEl = $('#toolsPanel');
       if (toolsEl) toolsEl.classList.remove('open');
       openVPanel(toolName);
       if (toolName === 'proxy') {
-        renderProxyList();
-        updateProxyToolbar();
+        if (typeof window.renderProxyList === 'function') window.renderProxyList();
+        if (typeof window.updateProxyToolbar === 'function') window.updateProxyToolbar();
       }
       if (toolName === 'cheatsheet' && typeof renderCheatSheet === 'function') {
         if (typeof cheatNav !== 'undefined') {
@@ -8176,235 +6706,19 @@ img, video, canvas { opacity: 0.9; }
           cheatNav.detailId = null;
           cheatNav._ready = true;
         }
-        // Ensure Pin buttons stay plain text
-      ['payloadPinBtn','historyPinBtn','cheatPinBtn','proxyPinBtn','settingsPinBtn','toolsPinBtn','payloadLibPinBtn','converterPinBtn'].forEach((id) => {
-        const b = document.getElementById(id);
-        if (b) b.textContent = b.classList.contains('active') ? 'Pinned' : 'Pin';
-      });
-      renderCheatSheet();
+        renderCheatSheet();
       }
     }
 
-    function updateProxyToolbar() {
-      const active = getActiveProxy();
-      const dot = $('#proxyStatusDot');
-      const label = $('#proxyActiveLabel');
-      const pingEl = $('#proxyPingMs');
-      const outEl = $('#proxyBytesOut');
-      const inEl = $('#proxyBytesIn');
-      if (label) label.textContent = active ? active.url : 'Direct (no proxy)';
-      if (outEl) outEl.textContent = formatBytes(active ? active.bytesOut : 0);
-      if (inEl) inEl.textContent = formatBytes(active ? active.bytesIn : 0);
-      if (pingEl) {
-        if (active && active.lastPingMs != null) {
-          pingEl.textContent = active.lastPingOk === false
-            ? `${active.lastPingMs}ms ✗`
-            : `${active.lastPingMs}ms`;
-        } else {
-          pingEl.textContent = active ? '—' : '';
-        }
-      }
-      if (dot) {
-        dot.classList.remove('ok', 'bad', 'pending');
-        if (!active) return;
-        if (active.lastPingOk === true) dot.classList.add('ok');
-        else if (active.lastPingOk === false) dot.classList.add('bad');
-        else dot.classList.add('pending');
-      }
-    }
 
-    function renderProxyList() {
-      const list = $('#proxyList');
-      if (!list) return;
-      const items = [...proxyState.items].sort((a, b) => {
-        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-        return (b.lastPingAt || 0) - (a.lastPingAt || 0);
-      });
-      if (!items.length) {
-        list.innerHTML = '<div class="proxy-empty">No proxies yet. Add Burp (<code>http://127.0.0.1:8080</code>) or any HTTP proxy.</div>';
-        return;
-      }
-      list.innerHTML = items.map((p) => {
-        const isActive = p.id === proxyState.activeId;
-        const pingTxt = p.lastPingMs != null
-          ? (p.lastPingOk === false ? `${p.lastPingMs}ms fail` : `${p.lastPingMs}ms`)
-          : 'not pinged';
-        return `
-          <div class="proxy-item${isActive ? ' active' : ''}${p.pinned ? ' pinned' : ''}" data-id="${p.id}">
-            <div class="proxy-item-top">
-              <span class="proxy-item-url" title="${escapeHtml(p.url)}">${escapeHtml(p.url)}</span>
-              <div class="proxy-item-actions">
-                <button type="button" class="use-btn${isActive ? ' active' : ''}" data-act="use" title="Use for requests">${isActive ? 'Active' : 'Use'}</button>
-                <button type="button" class="pin-btn${p.pinned ? ' on' : ''}" data-act="pin" title="Pin">${p.pinned ? 'Pinned' : 'Pin'}</button>
-                <button type="button" data-act="ping" title="Ping">Ping</button>
-                <button type="button" class="del-btn" data-act="del" title="Remove">×</button>
-              </div>
-            </div>
-            
-            <div class="proxy-item-meta">
-              <span>↑ ${formatBytes(p.bytesOut || 0)}</span>
-              <span>↓ ${formatBytes(p.bytesIn || 0)}</span>
-              <span>${pingTxt}</span>
-            </div>
-          </div>`;
-      }).join('');
-
-      list.querySelectorAll('.proxy-item').forEach((el) => {
-        const id = el.dataset.id;
-        el.querySelectorAll('button[data-act]').forEach((btn) => {
-          btn.addEventListener('click', async (e) => {
-            e.stopPropagation();
-            const act = btn.dataset.act;
-            const item = proxyState.items.find((x) => x.id === id);
-            if (!item) return;
-            if (act === 'use') {
-              proxyState.activeId = proxyState.activeId === id ? null : id;
-              saveProxyState();
-              renderProxyList();
-              updateProxyToolbar();
-              if (proxyState.activeId) pingProxy(item, true);
-              showToast(proxyState.activeId ? 'Proxy active' : 'Direct mode', 'success');
-            } else if (act === 'pin') {
-              item.pinned = !item.pinned;
-              saveProxyState();
-              renderProxyList();
-            } else if (act === 'ping') {
-              await pingProxy(item, true);
-            } else if (act === 'del') {
-              if (!confirm('Remove this proxy from the list?')) return;
-              proxyState.items = proxyState.items.filter((x) => x.id !== id);
-              if (proxyState.activeId === id) proxyState.activeId = null;
-              saveProxyState();
-              renderProxyList();
-              updateProxyToolbar();
-            }
-          });
-        });
-      });
-    }
-
-    async function pingProxy(item, showToastOnFail) {
-      if (!item || !item.url) return;
-      const dot = $('#proxyStatusDot');
-      if (dot && proxyState.activeId === item.id) {
-        dot.classList.remove('ok', 'bad');
-        dot.classList.add('pending');
-      }
-      try {
-        const res = await fetch(`${apiBaseUrl()}/api/proxy/ping`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ proxy: item.url }),
-        });
-        const data = await res.json();
-        item.lastPingMs = data.latency_ms != null ? data.latency_ms : null;
-        item.lastPingOk = !!data.ok;
-        item.lastPingAt = Date.now();
-        if (data.proxy_stats) applyServerProxyStats(data.proxy_stats);
-        saveProxyState();
-        updateProxyToolbar();
-        renderProxyList();
-        if (!data.ok && showToastOnFail) {
-          showToast(data.error || 'Proxy ping failed');
-        }
-      } catch (err) {
-        item.lastPingOk = false;
-        item.lastPingMs = null;
-        item.lastPingAt = Date.now();
-        saveProxyState();
-        updateProxyToolbar();
-        renderProxyList();
-        if (showToastOnFail) showToast('Backend unreachable for proxy ping');
-      }
-    }
-
-    function startProxyPingLoop() {
-      if (proxyPingTimer) clearInterval(proxyPingTimer);
-      proxyPingTimer = setInterval(() => {
-        // Only ping while Proxy tool panel is open
-        const panel = $('#proxyPanel');
-        if (!panel || !panel.classList.contains('open')) return;
-        const active = getActiveProxy();
-        if (active) pingProxy(active, false);
-      }, 10000);
-    }
-
-    function bindToolsAndProxyUI() {
-      $$('[data-open-tool]').forEach((btn) => {
+    // Tools picker → open tool panels (proxy manager lives in proxy.js)
+    (function bindToolsPicker() {
+      document.querySelectorAll('[data-open-tool]').forEach((btn) => {
         btn.addEventListener('click', () => openToolFromPicker(btn.dataset.openTool));
       });
-      const addBtn = $('#proxyAddBtn');
-      if (addBtn) {
-        addBtn.addEventListener('click', () => {
-          let url = ($('#proxyUrlInput')?.value || '').trim();
-          if (!url) {
-            showToast('Enter proxy URL');
-            return;
-          }
-          if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url)) url = 'http://' + url;
-          if (proxyState.items.some((p) => p.url === url)) {
-            showToast('Proxy already in list');
-            return;
-          }
-          const item = {
-            id: 'px-' + Date.now().toString(36),
-            url,
-            pinned: false,
-            bytesIn: 0,
-            bytesOut: 0,
-            lastPingMs: null,
-            lastPingOk: null,
-            lastPingAt: 0,
-          };
-          proxyState.items.push(item);
-          saveProxyState();
-          if ($('#proxyUrlInput')) $('#proxyUrlInput').value = '';
-          renderProxyList();
-          showToast('Proxy added', 'success');
-          pingProxy(item, false);
-        });
-      }
-      const pingNow = $('#proxyPingNowBtn');
-      if (pingNow) {
-        pingNow.addEventListener('click', () => {
-          const active = getActiveProxy();
-          if (!active) {
-            showToast('No active proxy');
-            return;
-          }
-          pingProxy(active, true);
-        });
-      }
-    }
-
-
-
-    // Attack stop conditions overlay
-    (function bindAtkStopOverlay() {
-      const openBtn = $('#atkStopOpenBtn');
-      const ov = $('#atkStopOverlay');
-      if (!openBtn || !ov) return;
-      const open = () => { ov.classList.add('open'); updateAtkStopSummary(); };
-      const close = () => { ov.classList.remove('open'); updateAtkStopSummary(); };
-      openBtn.addEventListener('click', (e) => { e.stopPropagation(); open(); });
-      $('#atkStopClose')?.addEventListener('click', close);
-      $('#atkStopDone')?.addEventListener('click', close);
-      $('#atkStopClear')?.addEventListener('click', () => {
-        ov.querySelectorAll('input[type=checkbox]').forEach((c) => { c.checked = false; });
-        ov.querySelectorAll('input[type=text], input[type=number]').forEach((i) => {
-          if (i.id === 'atkCondSizeDiffVal') i.value = '50';
-          else i.value = '';
-        });
-        updateAtkStopSummary();
-      });
-      ov.querySelectorAll('input, select').forEach((el) => {
-        el.addEventListener('change', updateAtkStopSummary);
-        el.addEventListener('input', updateAtkStopSummary);
-      });
-      $('#atkMatchAction')?.addEventListener('change', updateAtkStopSummary);
-      $('#atkMatchTimes')?.addEventListener('input', updateAtkStopSummary);
-      updateAtkStopSummary();
     })();
+
+    // Attack stop overlay → static/js/attack.js
 
 
     // ===== Backend health (ping /api/health every 10s) =====
@@ -8804,31 +7118,91 @@ img, video, canvas { opacity: 0.9; }
     /** Open panel in a real browser tab; close the in-page panel on the main tab. */
     function openPanelInNewTab(name) {
       const meta = SOLO_PANEL_META[name];
-      if (!meta) return;
+      if (!meta) {
+        showToast('Unknown panel: ' + name);
+        return false;
+      }
       if (soloPanel === name) {
-        showToast('Already in this tab', '');
-        return;
+        showToast('Already in this tab');
+        return false;
       }
-      // Persist payload draft + target URL so the new tab picks them up immediately
-      if (name === 'payload') {
-        if (payloadInput) {
-          try { localStorage.setItem(PAYLOAD_DRAFT_KEY, payloadInput.value || ''); } catch { /* ignore */ }
+      try {
+        if (name === 'payload') {
+          if (payloadInput) {
+            try { localStorage.setItem(PAYLOAD_DRAFT_KEY, payloadInput.value || ''); } catch (e) {}
+          }
+          if (typeof saveTargetUrl === 'function') saveTargetUrl();
         }
-        if (typeof saveTargetUrl === 'function') saveTargetUrl();
+        if (name === 'history' && typeof scheduleHistorySave === 'function') {
+          try { scheduleHistorySave(); } catch (e) {}
+        }
+      } catch (e) { /* ignore persist errors */ }
+
+      let href;
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('panel', name);
+        // avoid hash swallowing
+        url.hash = '';
+        href = url.href;
+      } catch (e) {
+        const base = (window.location.href || '').split('#')[0].split('?')[0];
+        href = base + '?panel=' + encodeURIComponent(name);
       }
-      const url = new URL(window.location.href);
-      url.searchParams.set('panel', name);
-      const w = window.open(url.toString(), meta.windowName);
-      if (!w) {
-        showToast('Pop-up blocked — allow pop-ups for this origin', '');
-        return;
+
+      console.info('[popout] opening', name, href);
+
+      // Method 1: synthetic <a target="_blank"> — most reliable under popup policies
+      let opened = false;
+      try {
+        const a = document.createElement('a');
+        a.href = href;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        opened = true;
+      } catch (e) {
+        console.warn('[popout] anchor click failed', e);
       }
-      try { w.focus(); } catch { /* ignore */ }
-      // Close the virtual panel on the main page
+
+      // Method 2: window.open fallback
+      if (!opened) {
+        try {
+          const w = window.open(href, '_blank', 'noopener,noreferrer');
+          opened = !!w;
+          if (w) {
+            try { w.focus(); } catch (e) {}
+          }
+        } catch (e) {
+          console.warn('[popout] window.open failed', e);
+        }
+      }
+
+      if (!opened) {
+        showToast('Pop-up blocked — allow pop-ups, or open: ' + href);
+        console.warn('[popout] blocked', href);
+        // last resort: copy URL
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(href);
+            showToast('Link copied — paste in a new tab');
+          }
+        } catch (e) {}
+        return false;
+      }
+
       if (!soloPanel && typeof closeVPanel === 'function') {
-        closeVPanel(name);
+        try { closeVPanel(name); } catch (e) {}
       }
+      showToast('Opened «' + name + '» in new tab', 'success');
+      return true;
     }
+    window.openPanelInNewTab = openPanelInNewTab;
+
+
 
     function bindSoloCloseButton(panelEl) {
       const closeBtn = panelEl && panelEl.querySelector('[data-close-panel]');
@@ -8911,22 +7285,39 @@ img, video, canvas { opacity: 0.9; }
     }
 
     function bindPanelPopoutButtons() {
-      $('#settingsPopoutBtn')?.addEventListener('click', (e) => {
+      if (window.__sqliPopoutBound) return;
+      window.__sqliPopoutBound = true;
+      const resolve = (el) => {
+        if (!el) return null;
+        return el.getAttribute('data-popout-panel')
+          || (el.id === 'settingsPopoutBtn' ? 'settings'
+            : el.id === 'payloadPopoutBtn' ? 'payload'
+              : el.id === 'historyPopoutBtn' ? 'history' : null);
+      };
+      const handler = (e) => {
+        const btn = e.target && e.target.closest && e.target.closest(
+          '#settingsPopoutBtn, #payloadPopoutBtn, #historyPopoutBtn, [data-popout-panel]'
+        );
+        if (!btn) return;
+        const name = resolve(btn);
+        if (!name) return;
+        // Must stay synchronous for browser to treat as user gesture
         e.preventDefault();
         e.stopPropagation();
-        openPanelInNewTab('settings');
-      });
-      $('#payloadPopoutBtn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openPanelInNewTab('payload');
-      });
-      $('#historyPopoutBtn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openPanelInNewTab('history');
+        openPanelInNewTab(name);
+      };
+      // click = strongest user-activation signal for window.open / <a target=_blank>
+      document.addEventListener('click', handler, true);
+      [
+        ['settingsPopoutBtn', 'settings'],
+        ['payloadPopoutBtn', 'payload'],
+        ['historyPopoutBtn', 'history'],
+      ].forEach(([id, name]) => {
+        const el = document.getElementById(id);
+        if (el) el.setAttribute('data-popout-panel', name);
       });
     }
+
 
     function setPayloadToolsOpen(open) {
       const wrap = $('#payloadToolsWrap');
@@ -9088,6 +7479,194 @@ img, video, canvas { opacity: 0.9; }
     }
 
     // ===== Init =====
+    // ===== Session Manager (Settings → General) =====
+    const SESSION_CATEGORIES = [
+      {
+        id: 'history',
+        label: 'Request History',
+        desc: 'History rows + attack sources',
+        keys: ['sqli-workbench-history-v1'],
+        onClear: () => {
+          state.history = [];
+          state.attackSources = {};
+          state.activeHistoryId = null;
+          state.nextId = 1;
+          if (typeof renderHistory === 'function') renderHistory();
+          if (typeof clearResponseView === 'function') clearResponseView();
+        },
+      },
+      {
+        id: 'payload',
+        label: 'Payload & Target',
+        desc: 'Draft payload, target URL/method, URL suggestions',
+        keys: [
+          'sqli-workbench-payload-draft',
+          'sqli-workbench-target-url',
+          'sqli-workbench-target-method',
+          'sqli-workbench-url-history-v1',
+        ],
+        onClear: () => {
+          if (payloadInput) payloadInput.value = '';
+          if (urlInput) urlInput.value = '';
+          if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
+        },
+      },
+      {
+        id: 'headers',
+        label: 'Headers & Cookies',
+        desc: 'Request headers + cookie metadata',
+        keys: ['sqli-workbench-headers', 'sqli-workbench-cookie-meta'],
+        onClear: () => {
+          if (typeof loadHeadersFromStorage === 'function') {
+            /* after remove, re-render */
+          }
+          if (typeof renderHeaders === 'function') renderHeaders();
+        },
+      },
+      {
+        id: 'filters',
+        label: 'History Filters',
+        desc: 'Advanced filter rules',
+        keys: ['sqli-workbench-hf-rules'],
+        onClear: () => {
+          state.hfRules = [];
+          if (typeof renderHfChips === 'function') renderHfChips();
+        },
+      },
+      {
+        id: 'appearance',
+        label: 'Appearance & Night Protect',
+        desc: 'UI theme density + night protect settings',
+        keys: ['sqli-workbench-appearance', 'sqli-workbench-nightprotect'],
+      },
+      {
+        id: 'shortcuts',
+        label: 'Keyboard Shortcuts',
+        desc: 'Custom shortcut bindings',
+        keys: ['sqli-workbench-shortcuts-v3', 'sqli-workbench-shortcuts-v2', 'sqli-workbench-shortcuts'],
+      },
+      {
+        id: 'tools',
+        label: 'Tools data',
+        desc: 'Cheat pins, payload library, proxies',
+        keys: ['sqli-workbench-cheat-pins', 'sqllix-payload-library', 'sqli-workbench-proxies-v1'],
+      },
+    ];
+
+    function formatStorageBytes(n) {
+      if (n < 1024) return n + ' B';
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+      return (n / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    function measureLocalKey(key) {
+      try {
+        const v = localStorage.getItem(key);
+        if (v == null) return 0;
+        // rough UTF-16 storage cost
+        return key.length * 2 + v.length * 2;
+      } catch (e) {
+        return 0;
+      }
+    }
+
+    function getSessionCategoryStats() {
+      return SESSION_CATEGORIES.map((cat) => {
+        let bytes = 0;
+        const present = [];
+        (cat.keys || []).forEach((k) => {
+          const b = measureLocalKey(k);
+          if (b > 0) {
+            bytes += b;
+            present.push({ key: k, bytes: b });
+          }
+        });
+        return { ...cat, bytes, present };
+      });
+    }
+
+    function renderSessionManager() {
+      const list = $('#sessionMgrList');
+      const totalEl = $('#sessionMgrTotal');
+      if (!list) return;
+      const stats = getSessionCategoryStats();
+      const total = stats.reduce((s, c) => s + c.bytes, 0);
+      if (totalEl) totalEl.textContent = 'Total ≈ ' + formatStorageBytes(total);
+      list.innerHTML = stats.map((c) => {
+        const keysHtml = c.present.length
+          ? c.present.map((p) =>
+              `<div class="session-mgr-key"><code>${escapeHtml(p.key)}</code><span>${formatStorageBytes(p.bytes)}</span></div>`
+            ).join('')
+          : '<div class="session-mgr-empty">Empty</div>';
+        return `<div class="session-mgr-card" data-cat="${escapeHtml(c.id)}">
+          <div class="session-mgr-card-top">
+            <div>
+              <div class="session-mgr-label">${escapeHtml(c.label)}</div>
+              <div class="session-mgr-desc">${escapeHtml(c.desc)}</div>
+            </div>
+            <div class="session-mgr-size">${formatStorageBytes(c.bytes)}</div>
+          </div>
+          <div class="session-mgr-keys">${keysHtml}</div>
+          <button type="button" class="btn btn-sm session-mgr-clear" data-clear-cat="${escapeHtml(c.id)}" ${c.bytes ? '' : 'disabled'}>Clear</button>
+        </div>`;
+      }).join('');
+      list.querySelectorAll('[data-clear-cat]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.clearCat;
+          const cat = SESSION_CATEGORIES.find((c) => c.id === id);
+          if (!cat) return;
+          if (!confirm('Clear «' + cat.label + '» from this browser?')) return;
+          (cat.keys || []).forEach((k) => {
+            try { localStorage.removeItem(k); } catch (e) {}
+          });
+          if (typeof cat.onClear === 'function') {
+            try { cat.onClear(); } catch (e) { console.warn(e); }
+          }
+          showToast('Cleared ' + cat.label, 'success');
+          renderSessionManager();
+        });
+      });
+    }
+
+    function openSessionManager() {
+      renderSessionManager();
+      if (typeof openVPanel === 'function') openVPanel('session-mgr');
+      else {
+        const p = $('#sessionMgrPanel');
+        if (p) p.classList.add('open');
+      }
+    }
+
+    function bindSessionManagerUI() {
+      $('#sessionMgrOpenBtn')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openSessionManager();
+      });
+      $('#sessionMgrRefreshBtn')?.addEventListener('click', () => renderSessionManager());
+      $('#sessionMgrClearAllBtn')?.addEventListener('click', () => {
+        if (!confirm('Clear ALL SQLlix data stored in this browser?')) return;
+        SESSION_CATEGORIES.forEach((cat) => {
+          (cat.keys || []).forEach((k) => {
+            try { localStorage.removeItem(k); } catch (e) {}
+          });
+          if (typeof cat.onClear === 'function') {
+            try { cat.onClear(); } catch (e) {}
+          }
+        });
+        // also wipe any leftover sqli* keys
+        const toRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && /sqli|sqllix|workbench/i.test(k)) toRemove.push(k);
+        }
+        toRemove.forEach((k) => { try { localStorage.removeItem(k); } catch (e) {} });
+        showToast('All SQLlix session data cleared', 'success');
+        renderSessionManager();
+      });
+    }
+
+
     function init() {
       startBackendHealthLoop();
       bindPayloadLibraryUI();
@@ -9100,10 +7679,6 @@ img, video, canvas { opacity: 0.9; }
       bindNpSettingsUI();
       if (typeof syncNightProtectBtn === 'function') syncNightProtectBtn();
 
-      loadProxyState();
-      bindToolsAndProxyUI();
-      updateProxyToolbar();
-      startProxyPingLoop();
 
       renderShortcutsList();
       renderHeaders();
@@ -9131,14 +7706,12 @@ img, video, canvas { opacity: 0.9; }
       bindTargetUrlSync();
       bindCrossTabSync();
       bindHistResponseUI();
-      if (typeof bindAttackScopeUI === 'function') bindAttackScopeUI();
-      if (typeof bindAttackSlotStopUI === 'function') bindAttackSlotStopUI();
-      if (typeof bindAttackCombosUI === 'function') bindAttackCombosUI();
       syncTopbarHeight();
       window.addEventListener('resize', syncTopbarHeight);
       if (isSoloSettings) enterSoloPanelMode('settings');
       if (isSoloPayload) enterSoloPanelMode('payload');
       if (isSoloHistory) enterSoloPanelMode('history');
+      if (typeof window.initProxy === 'function') window.initProxy();
       // Solo mode hides top-bar — re-sync so drawers/full panels use correct offset
       syncTopbarHeight();
     }
@@ -9158,5 +7731,55 @@ img, video, canvas { opacity: 0.9; }
       }, true);
     })();
 
+
+    // Bridge for attack.js module
+    window.__sqli = {
+      state: state,
+      $: $,
+      $$: $$,
+      get payloadInput() { return payloadInput; },
+      get methodSelect() { return methodSelect; },
+      get urlInput() { return urlInput; },
+      get postBodyInput() { return postBodyInput; },
+      get sendBtn() { return sendBtn; },
+      get historyStatusFilter() { return historyStatusFilter; },
+      get vpanelBackdrop() { return vpanelBackdrop; },
+      get urlProgressBar() { return urlProgressBar; },
+      get attackProgressLabel() { return attackProgressLabel; },
+      get pauseBtn() { return pauseBtn; },
+      get stopBtn() { return stopBtn; },
+      showToast: showToast,
+      escapeHtml: escapeHtml,
+      executeOneRequest: executeOneRequest,
+      buildRequestHeaders: buildRequestHeaders,
+      displayResponse: displayResponse,
+      renderHistory: renderHistory,
+      ensureAttackFilterOption: ensureAttackFilterOption,
+      closeVPanel: closeVPanel,
+      openVPanel: openVPanel,
+      setPayloadCollapsed: (typeof setPayloadCollapsed === 'function') ? setPayloadCollapsed : null,
+    };
+    if (typeof window.__bootAttack === 'function') window.__bootAttack();
+
     window.openVPanel = openVPanel;
+    window.formatBytes = formatBytes;
+    window.showToast = showToast;
+    if (typeof escapeHtml === 'function') window.escapeHtml = escapeHtml;
+
+    // Debug: list all SQLlix localStorage keys
+    window.__sqliListStorage = function () {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k) continue;
+        if (/sqli|sqllix|workbench/i.test(k)) {
+          let size = 0;
+          try { size = (localStorage.getItem(k) || '').length; } catch (e) {}
+          keys.push({ key: k, chars: size });
+        }
+      }
+      console.table(keys);
+      return keys;
+    };
+
     init();
