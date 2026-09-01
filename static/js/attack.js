@@ -1736,6 +1736,8 @@
     // Public API for app.js / sendRequest
     window.detectAttackMode = detectAttackMode;
     window.refreshAttackPanel = refreshAttackPanel;
+    // app.js init may have run before this file; refresh UI now
+    try { refreshAttackPanel(); } catch (e) { /* post-init refresh */ }
     window.runAttack = runAttack;
     window.runDollarAttack = runDollarAttack;
     window.applyPayloadPlaceholders = applyPayloadPlaceholders;

@@ -1585,10 +1585,23 @@
         enc: (s) => Array.from(new TextEncoder().encode(s)).map(b => b.toString(16).padStart(2, '0')).join(''),
         dec: (s) => {
           const clean = String(s).replace(/[^0-9a-fA-F]/g, '');
-          if (!clean) return '';
+          if (!clean || clean.length % 2) return '';
           const pairs = clean.match(/.{1,2}/g) || [];
           const bytes = new Uint8Array(pairs.map(h => parseInt(h, 16)));
-          return new TextDecoder().decode(bytes);
+          // Prefer valid UTF-8 without replacement chars; else printable ASCII only
+          try {
+            const out = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+            if (out.includes('�')) return '';
+            return out;
+          } catch (e) {
+            let out = '';
+            for (let i = 0; i < bytes.length; i++) {
+              const b = bytes[i];
+              if (b === 9 || b === 10 || b === 13 || (b >= 32 && b < 127)) out += String.fromCharCode(b);
+              else return ''; // binary / non-text → refuse
+            }
+            return out;
+          }
         },
       },
       html: {
@@ -1600,9 +1613,13 @@
           const cp = ch.codePointAt(0);
           return cp > 0xFFFF ? '\\u{' + cp.toString(16) + '}' : '\\u' + cp.toString(16).padStart(4, '0');
         }).join(''),
-        dec: (s) => String(s).replace(/\\u\{([0-9a-fA-F]+)\}|\\u([0-9a-fA-F]{4})/g, (_, a, b) => {
-          return String.fromCodePoint(parseInt(a || b, 16));
-        }),
+        dec: (s) => {
+          // Normalize JSON-escaped \\uXXXX → \uXXXX, then decode runs
+          const norm = String(s).replace(/\\{2,}u/gi, '\\u');
+          return norm.replace(/\\u\{([0-9a-fA-F]+)\}|\\u([0-9a-fA-F]{4})/g, (_, a, b) => {
+            return String.fromCodePoint(parseInt(a || b, 16));
+          });
+        },
       },
       ascii: {
         enc: (s) => Array.from(s).map(ch => ch.codePointAt(0)).join(' '),
@@ -1643,17 +1660,21 @@
         showToast('Convert failed: ' + (err.message || err));
       }
     }
-    function openConverter() {
+    function openConverter(presetText) {
       const input = $('#converterInput');
-      if (payloadInput && payloadInput.selectionStart !== payloadInput.selectionEnd) {
+      if (!input) return;
+      if (typeof presetText === 'string' && presetText.length) {
+        input.value = presetText;
+      } else if (payloadInput && payloadInput.selectionStart !== payloadInput.selectionEnd) {
         input.value = payloadInput.value.slice(payloadInput.selectionStart, payloadInput.selectionEnd);
-      } else if (input && !input.value && payloadInput) {
+      } else if (!input.value && payloadInput) {
         input.value = payloadInput.value;
       }
       if (typeof openVPanel === 'function') openVPanel('converter');
       else $('#converterPanel')?.classList.add('open');
       setTimeout(() => input?.focus(), 50);
     }
+    window.openConverter = openConverter;
     function closeConverter() {
       if (typeof closeVPanel === 'function') closeVPanel('converter');
       else $('#converterPanel')?.classList.remove('open');
@@ -4019,6 +4040,24 @@
       const rawBody = resp.body || '';
       const ct = (resp.headers && (resp.headers['Content-Type'] || resp.headers['content-type'])) || '';
       rawResponse.innerHTML = highlightCode(rawBody, ct);
+      // reset auto-decode toolbar state for new body
+      try {
+        _rawOriginalHtml = null;
+        _rawOriginalText = null;
+        _rawDecoded = false;
+        _rawDecSegments = [];
+        _rawDecIndex = -1;
+        _rawContentType = ct || '';
+        const rb = document.getElementById('rawRestoreBtn');
+        const rh = document.getElementById('rawAutoHint');
+        const nav = document.getElementById('rawDecNavWrap');
+        if (rb) rb.hidden = true;
+        if (rh) rh.textContent = '';
+        if (nav) nav.hidden = true;
+        const tip = document.getElementById('rawDecTip');
+        if (tip) tip.hidden = true;
+      } catch (e) {}
+
 
       const legend = `<div class="meta-legend">
         <span><i style="background:#ff6b6b"></i> Security</span>
@@ -4362,7 +4401,7 @@
           <div class="cookie-import-actions">
             <button type="button" class="btn btn-sm btn-ghost" id="cookieImportSelectAll">All</button>
             <button type="button" class="btn btn-sm btn-ghost" id="cookieImportSelectNone">None</button>
-            <button type="button" class="btn btn-sm btn-primary" id="cookieImportApply">Add selected → Headers</button>
+            <button type="button" class="night-protect-btn" id="cookieImportApply">Add selected → Headers</button>
           </div>
         </div>
       `;
@@ -4420,7 +4459,7 @@
           <div class="cookie-import-actions">
             <button type="button" class="btn btn-sm btn-ghost" id="histCookieAll">All</button>
             <button type="button" class="btn btn-sm btn-ghost" id="histCookieNone">None</button>
-            <button type="button" class="btn btn-sm btn-primary" id="histCookieApply">Add selected → Headers</button>
+            <button type="button" class="night-protect-btn" id="histCookieApply">Add selected → Headers</button>
           </div>
         </div>`;
       ov.classList.add('open');
@@ -5489,6 +5528,8 @@ img, video, canvas { opacity: 0.9; }
         if (WORK.has(name) && WORK.has(k)) return;
         // Opening a modal: keep work panels underneath
         if (MODALS.has(name) && WORK.has(k)) return;
+        // Session Manager stacks above Settings
+        if (name === 'session-mgr' && k === 'settings') return;
         el.classList.remove('open');
       });
       // Bring panel out of shelf when opened
@@ -5561,7 +5602,11 @@ img, video, canvas { opacity: 0.9; }
       targets.forEach((k) => {
         const el = $(VPANEL_MAP[k]);
         if (!el) return;
-        el.classList.remove('open');
+        el.classList.remove('open', 'panel-front');
+        if (k === 'session-mgr') {
+          el.style.cssText = '';
+          el.style.display = 'none';
+        }
         // Only unpin when that panel itself is being closed — pin means "don't auto-close"
         if (PINNABLE.has(k) && (!name || name === k)) unpinPanel(k);
         if (el) el.classList.remove('shelved');
@@ -6610,13 +6655,7 @@ img, video, canvas { opacity: 0.9; }
       state.activeHistoryId = entry.id;
 
       if (!entry.response?.cancelled) {
-        $$('.tab-btn').forEach(b => b.classList.remove('active'));
-        $$('.tab-content').forEach(c => c.classList.remove('active'));
-        const renderedTabBtn = document.querySelector('.tab-btn[data-tab="rendered"]');
-        if (renderedTabBtn) renderedTabBtn.classList.add('active');
-        const renderedTab = $('#tab-rendered');
-        if (renderedTab) renderedTab.classList.add('active');
-        activeTab = 'rendered';
+        // Keep whatever response tab user is on (Rendered / Raw / Headers)
         displayResponse(entry.response, finalUrl);
         renderHistory();
         if (typeof setPayloadCollapsed === 'function') setPayloadCollapsed(true);
@@ -7320,34 +7359,68 @@ img, video, canvas { opacity: 0.9; }
 
 
     function setPayloadToolsOpen(open) {
-      const wrap = $('#payloadToolsWrap');
-      const menu = $('#payloadToolsMenu');
-      const btn = $('#payloadToolsBtn');
-      const panel = $('#payloadWorkbench');
-      if (!wrap || !menu || !btn) return;
+      const wrap = document.getElementById('payloadToolsWrap');
+      const menu = document.getElementById('payloadToolsMenu');
+      const btn = document.getElementById('payloadToolsBtn');
+      const panel = document.getElementById('payloadWorkbench');
+      if (!wrap || !menu || !btn) {
+        console.warn('[payload-tools] missing DOM');
+        return;
+      }
       if (open) {
-        // absolute under .payload-tools-wrap (position:relative).
-        // Do NOT use position:fixed: .vpanel.float-center has transform, so
-        // fixed is relative to the panel — menu was placed off-screen and
-        // clipped by overflow:hidden (solo worked because transform:none).
+        if (menu.parentElement !== document.body) {
+          document.body.appendChild(menu);
+        }
         menu.hidden = false;
-        menu.style.position = 'absolute';
-        menu.style.top = 'calc(100% + 6px)';
-        menu.style.right = '0';
-        menu.style.left = 'auto';
-        menu.style.zIndex = '5000';
-        panel?.classList.add('tools-open');
-        requestAnimationFrame(() => wrap.classList.add('open'));
+        menu.removeAttribute('hidden');
+        const r = btn.getBoundingClientRect();
+        // measure after unhiding
+        menu.style.cssText = 'position:fixed;visibility:hidden;display:flex;flex-direction:column;min-width:180px;z-index:10050;';
+        const mw = Math.max(180, menu.offsetWidth || 180);
+        let left = r.right - mw;
+        if (left < 8) left = 8;
+        if (left + mw > window.innerWidth - 8) left = Math.max(8, window.innerWidth - mw - 8);
+        const top = Math.min(r.bottom + 6, window.innerHeight - 40);
+        menu.style.cssText = [
+          'position:fixed',
+          'top:' + top + 'px',
+          'left:' + left + 'px',
+          'right:auto',
+          'z-index:10050',
+          'display:flex',
+          'flex-direction:column',
+          'gap:2px',
+          'min-width:180px',
+          'padding:6px',
+          'opacity:1',
+          'pointer-events:auto',
+          'transform:none',
+          'visibility:visible',
+          'background:var(--bg-elevated,#24242e)',
+          'border:1px solid rgba(0,229,255,0.22)',
+          'border-radius:10px',
+          'box-shadow:0 12px 32px rgba(0,0,0,0.55)',
+        ].join(';');
+        if (panel) panel.classList.add('tools-open');
+        wrap.classList.add('open');
         btn.setAttribute('aria-expanded', 'true');
       } else {
         wrap.classList.remove('open');
-        panel?.classList.remove('tools-open');
+        if (panel) panel.classList.remove('tools-open');
         btn.setAttribute('aria-expanded', 'false');
+        menu.style.opacity = '0';
+        menu.style.pointerEvents = 'none';
         setTimeout(() => {
-          if (!wrap.classList.contains('open')) menu.hidden = true;
-        }, 180);
+          if (!wrap.classList.contains('open')) {
+            menu.hidden = true;
+            menu.setAttribute('hidden', '');
+            menu.style.display = 'none';
+            if (menu.parentElement === document.body) wrap.appendChild(menu);
+          }
+        }, 120);
       }
     }
+
 
     function bindPayloadToolsMenu() {
       const wrap = $('#payloadToolsWrap');
@@ -7391,9 +7464,10 @@ img, video, canvas { opacity: 0.9; }
       btn.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
+        e.stopImmediatePropagation();
         clearTimers();
         setPayloadToolsOpen(!wrap.classList.contains('open'));
-      });
+      }, true);
 
       // Choosing an item closes the menu (handlers on items still run)
       menu.addEventListener('click', (e) => {
@@ -7406,6 +7480,7 @@ img, video, canvas { opacity: 0.9; }
       document.addEventListener('click', (e) => {
         if (!wrap.classList.contains('open')) return;
         if (wrap.contains(e.target) || menu.contains(e.target)) return;
+        if (e.target.closest && e.target.closest('#payloadToolsMenu, #payloadToolsBtn')) return;
         clearTimers();
         setPayloadToolsOpen(false);
       });
@@ -7479,6 +7554,7 @@ img, video, canvas { opacity: 0.9; }
     }
 
     // ===== Init =====
+
     // ===== Session Manager (Settings → General) =====
     const SESSION_CATEGORIES = [
       {
@@ -7486,40 +7562,40 @@ img, video, canvas { opacity: 0.9; }
         label: 'Request History',
         desc: 'History rows + attack sources',
         keys: ['sqli-workbench-history-v1'],
+        resetOnReload: true,
         onClear: () => {
           state.history = [];
           state.attackSources = {};
           state.activeHistoryId = null;
           state.nextId = 1;
           if (typeof renderHistory === 'function') renderHistory();
-          if (typeof clearResponseView === 'function') clearResponseView();
         },
       },
       {
         id: 'payload',
         label: 'Payload & Target',
-        desc: 'Draft payload, target URL/method, URL suggestions',
+        desc: 'Draft, URL, method, URL history',
         keys: [
           'sqli-workbench-payload-draft',
           'sqli-workbench-target-url',
           'sqli-workbench-target-method',
           'sqli-workbench-url-history-v1',
         ],
+        resetOnReload: true,
         onClear: () => {
           if (payloadInput) payloadInput.value = '';
           if (urlInput) urlInput.value = '';
-          if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
+          if (typeof window.refreshAttackPanel === 'function') window.refreshAttackPanel();
         },
       },
       {
         id: 'headers',
         label: 'Headers & Cookies',
-        desc: 'Request headers + cookie metadata',
+        desc: 'Request headers + cookie meta',
         keys: ['sqli-workbench-headers', 'sqli-workbench-cookie-meta'],
+        resetOnReload: true,
         onClear: () => {
-          if (typeof loadHeadersFromStorage === 'function') {
-            /* after remove, re-render */
-          }
+          if (typeof loadPersistedHeaders === 'function') loadPersistedHeaders();
           if (typeof renderHeaders === 'function') renderHeaders();
         },
       },
@@ -7528,33 +7604,40 @@ img, video, canvas { opacity: 0.9; }
         label: 'History Filters',
         desc: 'Advanced filter rules',
         keys: ['sqli-workbench-hf-rules'],
+        resetOnReload: true,
         onClear: () => {
-          state.hfRules = [];
+          if (state.hfRules) state.hfRules = [];
           if (typeof renderHfChips === 'function') renderHfChips();
         },
       },
       {
         id: 'appearance',
         label: 'Appearance & Night Protect',
-        desc: 'UI theme density + night protect settings',
+        desc: 'Theme / density / night protect',
         keys: ['sqli-workbench-appearance', 'sqli-workbench-nightprotect'],
+        resetOnReload: false,
       },
       {
         id: 'shortcuts',
         label: 'Keyboard Shortcuts',
-        desc: 'Custom shortcut bindings',
+        desc: 'Custom bindings',
         keys: ['sqli-workbench-shortcuts-v3', 'sqli-workbench-shortcuts-v2', 'sqli-workbench-shortcuts'],
+        resetOnReload: false,
       },
       {
         id: 'tools',
         label: 'Tools data',
         desc: 'Cheat pins, payload library, proxies',
         keys: ['sqli-workbench-cheat-pins', 'sqllix-payload-library', 'sqli-workbench-proxies-v1'],
+        resetOnReload: true,
       },
     ];
 
+    const SESSION_SAVED_KEY = 'sqli-workbench-saved-sessions-v1';
+    const SESSION_RESET_FLAG = 'sqli-workbench-reset-on-reload';
+
     function formatStorageBytes(n) {
-      if (n < 1024) return n + ' B';
+      if (!n || n < 1024) return (n || 0) + ' B';
       if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
       return (n / (1024 * 1024)).toFixed(2) + ' MB';
     }
@@ -7563,7 +7646,6 @@ img, video, canvas { opacity: 0.9; }
       try {
         const v = localStorage.getItem(key);
         if (v == null) return 0;
-        // rough UTF-16 storage cost
         return key.length * 2 + v.length * 2;
       } catch (e) {
         return 0;
@@ -7581,93 +7663,995 @@ img, video, canvas { opacity: 0.9; }
             present.push({ key: k, bytes: b });
           }
         });
-        return { ...cat, bytes, present };
+        return Object.assign({}, cat, { bytes: bytes, present: present });
       });
     }
 
+    function clearSessionCategory(cat) {
+      (cat.keys || []).forEach((k) => {
+        try { localStorage.removeItem(k); } catch (e) {}
+      });
+      if (typeof cat.onClear === 'function') {
+        try { cat.onClear(); } catch (e) { console.warn(e); }
+      }
+    }
+
+    function collectCategoryData(catIds) {
+      const out = {};
+      SESSION_CATEGORIES.forEach((cat) => {
+        if (catIds && catIds.length && catIds.indexOf(cat.id) < 0) return;
+        const bag = {};
+        (cat.keys || []).forEach((k) => {
+          try {
+            const v = localStorage.getItem(k);
+            if (v != null) bag[k] = v;
+          } catch (e) {}
+        });
+        if (Object.keys(bag).length) out[cat.id] = bag;
+      });
+      return out;
+    }
+
+    function applyCategoryData(data, catIds) {
+      if (!data || typeof data !== 'object') return;
+      SESSION_CATEGORIES.forEach((cat) => {
+        if (catIds && catIds.length && catIds.indexOf(cat.id) < 0) return;
+        const bag = data[cat.id];
+        if (!bag || typeof bag !== 'object') return;
+        Object.keys(bag).forEach((k) => {
+          try { localStorage.setItem(k, bag[k]); } catch (e) {}
+        });
+        // soft reload of runtime state for known categories
+        if (cat.id === 'history' && typeof loadHistoryFromStorage === 'function') {
+          try { loadHistoryFromStorage(); } catch (e) {}
+          if (typeof renderHistory === 'function') renderHistory();
+        }
+        if (cat.id === 'headers') {
+          if (typeof loadPersistedHeaders === 'function') loadPersistedHeaders();
+          if (typeof renderHeaders === 'function') renderHeaders();
+        }
+        if (cat.id === 'payload') {
+          if (typeof loadPayloadDraft === 'function') loadPayloadDraft();
+          if (typeof loadTargetUrl === 'function') loadTargetUrl();
+        }
+        if (cat.id === 'appearance' && typeof applyAppearance === 'function' && typeof loadAppearance === 'function') {
+          applyAppearance(loadAppearance());
+        }
+        if (cat.id === 'filters' && typeof renderHfChips === 'function') renderHfChips();
+      });
+    }
+
+    function loadSavedSessions() {
+      try {
+        const raw = localStorage.getItem(SESSION_SAVED_KEY);
+        const list = raw ? JSON.parse(raw) : [];
+        return Array.isArray(list) ? list : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function persistSavedSessions(list) {
+      try {
+        localStorage.setItem(SESSION_SAVED_KEY, JSON.stringify(list || []));
+      } catch (e) {
+        showToast('Could not save sessions (storage full?)');
+      }
+    }
+
     function renderSessionManager() {
-      const list = $('#sessionMgrList');
-      const totalEl = $('#sessionMgrTotal');
+      const list = document.getElementById('sessionMgrList');
+      const totalEl = document.getElementById('sessionMgrTotal');
+      const savedEl = document.getElementById('sessionMgrSavedList');
       if (!list) return;
       const stats = getSessionCategoryStats();
       const total = stats.reduce((s, c) => s + c.bytes, 0);
-      if (totalEl) totalEl.textContent = 'Total ≈ ' + formatStorageBytes(total);
+      if (totalEl) totalEl.textContent = formatStorageBytes(total);
+
+      const resetCb = document.getElementById('sessionMgrResetOnReload');
+      if (resetCb) {
+        try {
+          const on = localStorage.getItem(SESSION_RESET_FLAG) === '1';
+          resetCb.setAttribute('aria-pressed', on ? 'true' : 'false');
+          resetCb.classList.toggle('on', on);
+        } catch (e) {}
+      }
+
+      // Preserve selected state across re-render
+      const prevChecked = {};
+      list.querySelectorAll('.session-mgr-export-cb').forEach((cb) => {
+        prevChecked[cb.getAttribute('data-cat')] = cb.classList.contains('on');
+      });
+
       list.innerHTML = stats.map((c) => {
-        const keysHtml = c.present.length
-          ? c.present.map((p) =>
-              `<div class="session-mgr-key"><code>${escapeHtml(p.key)}</code><span>${formatStorageBytes(p.bytes)}</span></div>`
-            ).join('')
-          : '<div class="session-mgr-empty">Empty</div>';
-        return `<div class="session-mgr-card" data-cat="${escapeHtml(c.id)}">
-          <div class="session-mgr-card-top">
-            <div>
-              <div class="session-mgr-label">${escapeHtml(c.label)}</div>
-              <div class="session-mgr-desc">${escapeHtml(c.desc)}</div>
-            </div>
-            <div class="session-mgr-size">${formatStorageBytes(c.bytes)}</div>
-          </div>
-          <div class="session-mgr-keys">${keysHtml}</div>
-          <button type="button" class="btn btn-sm session-mgr-clear" data-clear-cat="${escapeHtml(c.id)}" ${c.bytes ? '' : 'disabled'}>Clear</button>
-        </div>`;
+        const checked = prevChecked.hasOwnProperty(c.id) ? prevChecked[c.id] : true;
+        const emptyCls = c.bytes ? '' : ' is-empty';
+        const trashIco = '<svg class="sm-trash-ico" viewBox="0 0 24 24" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a1 1 0 0 0 1-1V8H5v12a1 1 0 0 0 1 1z"/></svg>';
+        return (
+          '<div class="sm-cat' + emptyCls + '" data-cat="' + escapeHtml(c.id) + '">' +
+            '<div class="sm-cat-check"><button type="button" class="sm-neon-check session-mgr-export-cb' + (checked ? ' on' : '') + '" data-cat="' + escapeHtml(c.id) + '" aria-pressed="' + (checked ? 'true' : 'false') + '" title="Include in export / save"></button></div>' +
+            '<div class="sm-cat-desc">' + escapeHtml(c.desc) + '</div>' +
+            '<div class="sm-cat-name">' + escapeHtml(c.label) + '</div>' +
+            '<div class="sm-cat-size">' + formatStorageBytes(c.bytes) + '</div>' +
+            '<button type="button" class="sm-cat-clear" data-clear-cat="' + escapeHtml(c.id) + '"' + (c.bytes ? '' : ' disabled') + ' title="Clear this category">' + trashIco + '</button>' +
+          '</div>'
+        );
       }).join('');
+
+      list.querySelectorAll('.session-mgr-export-cb').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const on = !btn.classList.contains('on');
+          btn.classList.toggle('on', on);
+          btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+      });
+
       list.querySelectorAll('[data-clear-cat]').forEach((btn) => {
         btn.addEventListener('click', () => {
-          const id = btn.dataset.clearCat;
+          const id = btn.getAttribute('data-clear-cat');
           const cat = SESSION_CATEGORIES.find((c) => c.id === id);
           if (!cat) return;
-          if (!confirm('Clear «' + cat.label + '» from this browser?')) return;
-          (cat.keys || []).forEach((k) => {
-            try { localStorage.removeItem(k); } catch (e) {}
-          });
-          if (typeof cat.onClear === 'function') {
-            try { cat.onClear(); } catch (e) { console.warn(e); }
-          }
+          if (!confirm('Clear «' + cat.label + '»?')) return;
+          clearSessionCategory(cat);
           showToast('Cleared ' + cat.label, 'success');
           renderSessionManager();
         });
       });
-    }
 
-    function openSessionManager() {
-      renderSessionManager();
-      if (typeof openVPanel === 'function') openVPanel('session-mgr');
-      else {
-        const p = $('#sessionMgrPanel');
-        if (p) p.classList.add('open');
+      if (savedEl) {
+        const saved = loadSavedSessions();
+        if (!saved.length) {
+          savedEl.innerHTML = '<div class="sm-empty">No snapshots yet — name one above and hit Save</div>';
+        } else {
+          savedEl.innerHTML = saved.map((s, idx) => {
+            const when = s.savedAt ? new Date(s.savedAt).toLocaleString() : '';
+            return (
+              '<div class="sm-snap" data-idx="' + idx + '">' +
+                '<div class="sm-snap-meta">' +
+                  '<span class="sm-snap-name">' + escapeHtml(s.name || 'Untitled') + '</span>' +
+                  '<span class="sm-snap-date">' + escapeHtml(when) + '</span>' +
+                '</div>' +
+                '<div class="sm-snap-actions">' +
+                  '<button type="button" class="night-protect-btn session-mgr-load" data-idx="' + idx + '">Load</button>' +
+                  '<button type="button" class="sm-icon-btn session-mgr-del" data-idx="' + idx + '" title="Delete snapshot">' +
+                    '<svg class="sm-trash-ico" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12a1 1 0 0 0 1-1V8H5v12a1 1 0 0 0 1 1z"/></svg>' +
+                  '</button>' +
+                '</div>' +
+              '</div>'
+            );
+          }).join('');
+          savedEl.querySelectorAll('.session-mgr-load').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const idx = +btn.getAttribute('data-idx');
+              const item = loadSavedSessions()[idx];
+              if (!item || !item.data) return;
+              if (!confirm('Load «' + (item.name || '') + '»? Matching keys will be overwritten.')) return;
+              applyCategoryData(item.data, null);
+              showToast('Snapshot loaded', 'success');
+              renderSessionManager();
+            });
+          });
+          savedEl.querySelectorAll('.session-mgr-del').forEach((btn) => {
+            btn.addEventListener('click', () => {
+              const idx = +btn.getAttribute('data-idx');
+              const list2 = loadSavedSessions();
+              const name = (list2[idx] && list2[idx].name) || '';
+              if (!confirm('Delete «' + name + '»?')) return;
+              list2.splice(idx, 1);
+              persistSavedSessions(list2);
+              renderSessionManager();
+            });
+          });
+        }
       }
     }
 
-    function bindSessionManagerUI() {
-      $('#sessionMgrOpenBtn')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        openSessionManager();
-      });
-      $('#sessionMgrRefreshBtn')?.addEventListener('click', () => renderSessionManager());
-      $('#sessionMgrClearAllBtn')?.addEventListener('click', () => {
-        if (!confirm('Clear ALL SQLlix data stored in this browser?')) return;
-        SESSION_CATEGORIES.forEach((cat) => {
-          (cat.keys || []).forEach((k) => {
-            try { localStorage.removeItem(k); } catch (e) {}
-          });
-          if (typeof cat.onClear === 'function') {
-            try { cat.onClear(); } catch (e) {}
-          }
-        });
-        // also wipe any leftover sqli* keys
-        const toRemove = [];
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && /sqli|sqllix|workbench/i.test(k)) toRemove.push(k);
+    function closeSessionManager() {
+      const p = document.getElementById('sessionMgrPanel');
+      if (p) {
+        p.classList.remove('open', 'panel-front');
+        // Override any previous forced open styles (incl. !important via attribute)
+        p.removeAttribute('style');
+        p.setAttribute('style', 'display:none !important; opacity:0 !important; pointer-events:none !important; visibility:hidden !important;');
+      }
+      if (typeof activeVPanel !== 'undefined' && activeVPanel === 'session-mgr') {
+        activeVPanel = 'settings';
+      }
+      const settings = document.getElementById('settingsPanel');
+      const settingsOpen = settings && settings.classList.contains('open');
+      if (typeof vpanelBackdrop !== 'undefined' && vpanelBackdrop) {
+        // keep backdrop if settings still open
+        if (!settingsOpen) vpanelBackdrop.classList.remove('open');
+      }
+    }
+
+    function openSessionManager() {
+      try { renderSessionManager(); } catch (err) { console.error('[session-mgr] render', err); }
+      const p = document.getElementById('sessionMgrPanel');
+      if (!p) {
+        showToast('Session Manager panel missing');
+        return;
+      }
+      p.removeAttribute('style');
+      if (typeof openVPanel === 'function') openVPanel('session-mgr');
+      p.classList.add('open');
+      p.style.zIndex = '900';
+      if (typeof vpanelBackdrop !== 'undefined' && vpanelBackdrop) vpanelBackdrop.classList.add('open');
+    }
+    window.openSessionManager = openSessionManager;
+    window.closeSessionManager = closeSessionManager;
+
+    function exportSessionCategories() {
+      const cbs = document.querySelectorAll('.session-mgr-export-cb.on');
+      const ids = Array.from(cbs).map((c) => c.getAttribute('data-cat')).filter(Boolean);
+      if (!ids.length) {
+        showToast('Select at least one category');
+        return;
+      }
+      const data = collectCategoryData(ids);
+      const payload = {
+        type: 'sqllix-session',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        categories: ids,
+        data: data,
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'sqllix-session-' + stamp + '.json';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+      showToast('Exported ' + ids.length + ' categories', 'success');
+    }
+
+    function importSessionFromFile(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result || ''));
+          const data = parsed && parsed.data ? parsed.data : parsed;
+          if (!data || typeof data !== 'object') throw new Error('Invalid file');
+          const cats = parsed.categories || Object.keys(data);
+          if (!confirm('Import session? Categories: ' + cats.join(', '))) return;
+          applyCategoryData(data, null);
+          showToast('Session imported', 'success');
+          renderSessionManager();
+        } catch (err) {
+          showToast('Import failed: ' + (err && err.message ? err.message : err));
         }
-        toRemove.forEach((k) => { try { localStorage.removeItem(k); } catch (e) {} });
-        showToast('All SQLlix session data cleared', 'success');
-        renderSessionManager();
+      };
+      reader.readAsText(file);
+    }
+
+    function resetSessionKeepPrefs() {
+      if (!confirm('Reset session? History, payload draft, headers, filters & tools data will be cleared. Appearance & shortcuts stay.')) return;
+      SESSION_CATEGORIES.forEach((cat) => {
+        if (cat.resetOnReload === false) return;
+        clearSessionCategory(cat);
       });
+      showToast('Session reset', 'success');
+      renderSessionManager();
+    }
+
+    function applyResetOnReloadIfNeeded() {
+      try {
+        if (localStorage.getItem(SESSION_RESET_FLAG) !== '1') return;
+        SESSION_CATEGORIES.forEach((cat) => {
+          if (cat.resetOnReload === false) return;
+          clearSessionCategory(cat);
+        });
+        // flag stays on until user turns it off
+      } catch (e) {}
+    }
+
+    function bindSessionManagerUI() {
+      if (window.__sqliSessionMgrBound) return;
+      window.__sqliSessionMgrBound = true;
+
+      document.addEventListener('click', (e) => {
+        const t = e.target;
+        if (!t || !t.closest) return;
+        if (t.closest('#sessionMgrOpenBtn')) {
+          e.preventDefault();
+          e.stopPropagation();
+          openSessionManager();
+          return;
+        }
+        if (t.closest('#sessionMgrCloseBtn') || t.closest('#sessionMgrPanel [data-close-panel]')) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          closeSessionManager();
+          return;
+        }
+        if (t.closest('#sessionMgrRefreshBtn')) {
+          e.preventDefault();
+          renderSessionManager();
+        }
+        if (t.closest('#sessionMgrExportBtn')) {
+          e.preventDefault();
+          exportSessionCategories();
+        }
+        if (t.closest('#sessionMgrImportBtn')) {
+          e.preventDefault();
+          const fi = document.getElementById('sessionMgrImportFile');
+          if (fi) fi.click();
+        }
+        if (t.closest('#sessionMgrResetBtn')) {
+          e.preventDefault();
+          resetSessionKeepPrefs();
+        }
+        if (t.closest('#sessionMgrClearAllBtn')) {
+          e.preventDefault();
+          if (!confirm('Clear ALL SQLlix data in this browser (including appearance)?')) return;
+          SESSION_CATEGORIES.forEach((cat) => clearSessionCategory(cat));
+          const toRemove = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && /sqli|sqllix|workbench/i.test(k) && k !== SESSION_SAVED_KEY && k !== SESSION_RESET_FLAG) toRemove.push(k);
+          }
+          toRemove.forEach((k) => { try { localStorage.removeItem(k); } catch (e) {} });
+          showToast('All data cleared', 'success');
+          renderSessionManager();
+        }
+        if (t.closest('#sessionMgrSaveBtn')) {
+          e.preventDefault();
+          const nameEl = document.getElementById('sessionMgrSaveName');
+          const name = ((nameEl && nameEl.value) || '').trim() || ('Session ' + new Date().toLocaleString());
+          const cbs = document.querySelectorAll('.session-mgr-export-cb.on');
+          let ids = Array.from(cbs).map((c) => c.getAttribute('data-cat')).filter(Boolean);
+          if (!ids.length) ids = SESSION_CATEGORIES.map((c) => c.id);
+          const data = collectCategoryData(ids);
+          const list = loadSavedSessions();
+          list.unshift({ name: name, savedAt: new Date().toISOString(), categories: ids, data: data });
+          if (list.length > 20) list.length = 20;
+          persistSavedSessions(list);
+          if (nameEl) nameEl.value = '';
+          showToast('Session saved', 'success');
+          renderSessionManager();
+        }
+      }, true);
+
+      const closeBtn = document.getElementById('sessionMgrCloseBtn');
+      if (closeBtn) {
+        closeBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          closeSessionManager();
+        });
+      }
+
+      const fileInput = document.getElementById('sessionMgrImportFile');
+      if (fileInput) {
+        fileInput.addEventListener('change', () => {
+          const f = fileInput.files && fileInput.files[0];
+          importSessionFromFile(f);
+          fileInput.value = '';
+        });
+      }
+
+
+      // Session Manager inner tabs + select all/none
+      document.querySelectorAll('.sm-tab').forEach((tab) => {
+        tab.addEventListener('click', () => {
+          const name = tab.getAttribute('data-sm-tab');
+          document.querySelectorAll('.sm-tab').forEach((t) => t.classList.toggle('active', t === tab));
+          const storage = document.getElementById('smTabStorage');
+          const snaps = document.getElementById('smTabSnapshots');
+          if (storage) storage.classList.toggle('active', name === 'storage');
+          if (snaps) snaps.classList.toggle('active', name === 'snapshots');
+        });
+      });
+      const selAll = document.getElementById('sessionMgrSelectAll');
+      const selNone = document.getElementById('sessionMgrSelectNone');
+      if (selAll) selAll.addEventListener('click', () => {
+        document.querySelectorAll('.session-mgr-export-cb').forEach((c) => {
+          c.classList.add('on');
+          c.setAttribute('aria-pressed', 'true');
+        });
+      });
+      if (selNone) selNone.addEventListener('click', () => {
+        document.querySelectorAll('.session-mgr-export-cb').forEach((c) => {
+          c.classList.remove('on');
+          c.setAttribute('aria-pressed', 'false');
+        });
+      });
+
+      const resetBtn = document.getElementById('sessionMgrResetOnReload');
+      if (resetBtn && !resetBtn.dataset.bound) {
+        resetBtn.dataset.bound = '1';
+        resetBtn.addEventListener('click', () => {
+          const on = resetBtn.getAttribute('aria-pressed') !== 'true';
+          resetBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+          resetBtn.classList.toggle('on', on);
+          try {
+            localStorage.setItem(SESSION_RESET_FLAG, on ? '1' : '0');
+            showToast(on ? 'Will reset session on next reload' : 'Reset on reload off');
+          } catch (e) {}
+        });
+      }
     }
 
 
+    // ===== Selection decode bar (Raw response) =====
+    const SEL_DECODE_CODECS = [
+      { id: 'url', label: 'URL' },
+      { id: 'b64', label: 'Base64' },
+      { id: 'hex', label: 'Hex' },
+      { id: 'unicode', label: 'Unicode' },
+    ];
+
+    let _selDecodeState = { text: '', rect: null, results: {}, active: null };
+
+    function selDecodeTry(codec, text, direction) {
+      try {
+        const pair = converterEncoders[codec];
+        if (!pair) return null;
+        let fn = direction === 'enc' ? pair.enc : (pair.dec || pair.enc);
+        if (!fn) return null;
+        const src = String(text);
+        const out = fn(src.trim());
+        if (out == null || out === '') return null;
+        if (out === src || out === src.trim()) return null;
+        // Reject garbage for strict codecs
+        if (direction === 'dec') {
+          if (codec === 'b64') {
+            const t = src.trim().replace(/\s+/g, '');
+            if (t.length < 4 || !/^[A-Za-z0-9+/]+=*$/.test(t)) return null;
+          }
+          if (codec === 'hex') {
+            const t = src.replace(/[^0-9a-fA-F]/g, '');
+            if (t.length < 2 || t.length % 2) return null;
+          }
+          if (codec === 'url') {
+            if (!/%[0-9a-fA-F]{2}/.test(src)) return null;
+          }
+          if (codec === 'unicode') {
+            // must contain \uXXXX or \\uXXXX style escapes
+            if (!/\\u[0-9a-fA-F]{4}|\\u\{[0-9a-fA-F]+\}/i.test(src)) return null;
+          }
+          if (codec === 'html') {
+            if (!/&(?:#\d+|#x[0-9a-fA-F]+|\w+);/i.test(src)) return null;
+          }
+          if (codec === 'ascii') {
+            if (!/^\s*\d+(\s+\d+)+\s*$/.test(src.trim())) return null;
+          }
+        }
+        // printable-ish
+        const bad = (out.match(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g) || []).length;
+        if (bad > Math.max(2, out.length * 0.05)) return null;
+        return out;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function selDecodeAnalyze(text) {
+      const results = {};
+      SEL_DECODE_CODECS.forEach((c) => {
+        const dec = selDecodeTry(c.id, text, 'dec');
+        if (dec) results[c.id] = { direction: 'dec', out: dec, label: c.label + ' ↓' };
+        else {
+          // still mark for encode preview on click (not highlighted as hit)
+          const enc = selDecodeTry(c.id, text, 'enc');
+          if (enc) results[c.id] = { direction: 'enc', out: enc, label: c.label + ' ↑', soft: true };
+        }
+      });
+      return results;
+    }
+
+    function hideSelDecodeUI() {
+      const bar = document.getElementById('selDecodeBar');
+      const prev = document.getElementById('selDecodePreview');
+      if (bar) bar.hidden = true;
+      if (prev) prev.hidden = true;
+      _selDecodeState.active = null;
+    }
+
+    function positionNearRect(el, rect, preferAbove) {
+      if (!el || !rect) return;
+      const pad = 8;
+      el.hidden = false;
+      // measure
+      const w = el.offsetWidth || 280;
+      const h = el.offsetHeight || 40;
+      let left = rect.left + rect.width / 2 - w / 2;
+      left = Math.max(pad, Math.min(window.innerWidth - w - pad, left));
+      let top;
+      if (preferAbove !== false) {
+        top = rect.top - h - 8;
+        if (top < pad) top = rect.bottom + 8;
+      } else {
+        top = rect.bottom + 8;
+        if (top + h > window.innerHeight - pad) top = rect.top - h - 8;
+      }
+      top = Math.max(pad, Math.min(window.innerHeight - h - pad, top));
+      el.style.left = left + 'px';
+      el.style.top = top + 'px';
+    }
+
+    function showSelDecodePreview(codec) {
+      const info = _selDecodeState.results[codec];
+      if (!info) return;
+      _selDecodeState.active = codec;
+      const prev = document.getElementById('selDecodePreview');
+      const body = document.getElementById('selDecodePreviewBody');
+      const label = document.getElementById('selDecodePreviewLabel');
+      if (!prev || !body) return;
+      if (label) label.textContent = info.label + ' · ' + info.direction;
+      body.textContent = info.out;
+      positionNearRect(prev, _selDecodeState.rect, false);
+      // mark active chip
+      document.querySelectorAll('.sel-decode-chip').forEach((ch) => {
+        ch.classList.toggle('is-active', ch.dataset.codec === codec);
+      });
+    }
+
+    function showSelDecodeBar(text, rect) {
+      const bar = document.getElementById('selDecodeBar');
+      const chips = document.getElementById('selDecodeChips');
+      if (!bar || !chips) return;
+      const results = selDecodeAnalyze(text);
+      _selDecodeState = { text: text, rect: rect, results: results, active: null };
+
+      // Order: hits first, then rest
+      const ordered = SEL_DECODE_CODECS.slice().sort((a, b) => {
+        const ha = results[a.id] ? 0 : 1;
+        const hb = results[b.id] ? 0 : 1;
+        return ha - hb;
+      });
+
+      chips.innerHTML = ordered.map((c) => {
+        const r = results[c.id];
+        const hit = !!(r && r.direction === 'dec' && !r.soft);
+        const tip = r
+          ? ((r.direction === 'dec' ? 'Decode as ' : 'Encode as ') + c.label)
+          : ('Try ' + c.label);
+        return (
+          '<button type="button" class="sel-decode-chip' + (hit ? ' is-hit' : '') + '" data-codec="' + c.id + '" title="' + tip + '">' +
+            c.label +
+          '</button>'
+        );
+      }).join('');
+
+      chips.querySelectorAll('.sel-decode-chip').forEach((btn) => {
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        });
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const codec = btn.dataset.codec;
+          // ensure result exists (force encode if needed)
+          if (!_selDecodeState.results[codec]) {
+            const enc = selDecodeTry(codec, _selDecodeState.text, 'enc');
+            const dec = selDecodeTry(codec, _selDecodeState.text, 'dec');
+            if (dec) _selDecodeState.results[codec] = { direction: 'dec', out: dec, label: codec.toUpperCase() + ' ↓' };
+            else if (enc) _selDecodeState.results[codec] = { direction: 'enc', out: enc, label: codec.toUpperCase() + ' ↑' };
+            else {
+              showToast('Cannot convert with ' + codec);
+              return;
+            }
+          }
+          showSelDecodePreview(codec);
+        });
+      });
+
+      const prev = document.getElementById('selDecodePreview');
+      if (prev) prev.hidden = true;
+      positionNearRect(bar, rect, true);
+
+      // auto-open first hit preview? no — keep compact like translation extensions
+    }
+
+    function getSelectionInRaw() {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+      const text = String(sel.toString() || '');
+      if (!text.trim()) return null;
+      const range = sel.getRangeAt(0);
+      let node = range.commonAncestorContainer;
+      if (node && node.nodeType === 3) node = node.parentElement;
+      const host = node && node.closest
+        ? node.closest('#rawResponse, #histRawResponse, pre.raw-response')
+        : null;
+      if (!host) return null;
+      const rect = range.getBoundingClientRect();
+      if (!rect || (rect.width === 0 && rect.height === 0 && text.length < 1)) return null;
+      // fallback rect from host if zero
+      let useRect = rect;
+      if (rect.width === 0 && rect.height === 0) {
+        useRect = host.getBoundingClientRect();
+      }
+      return { text: text, rect: useRect, host: host };
+    }
+
+
+    function bindSelectionDecodeBar() {
+      if (window.__sqliSelDecodeBound) return;
+      window.__sqliSelDecodeBound = true;
+
+      let _showTimer = null;
+      let selecting = false;
+
+      const tryShow = () => {
+        clearTimeout(_showTimer);
+        _showTimer = setTimeout(() => {
+          if (selecting) return;
+          const info = getSelectionInRaw();
+          if (!info) {
+            hideSelDecodeUI();
+            return;
+          }
+          showSelDecodeBar(info.text, info.rect);
+        }, 30);
+      };
+
+      // Only show after selection is finished (mouseup), not while dragging
+      const attachHost = (el) => {
+        if (!el || el.dataset.selDecodeBound) return;
+        el.dataset.selDecodeBound = '1';
+        el.addEventListener('mousedown', () => { selecting = true; });
+        el.addEventListener('mouseup', (e) => {
+          if (e.button !== 0) return;
+          selecting = false;
+          tryShow();
+        });
+      };
+      attachHost(document.getElementById('rawResponse'));
+      attachHost(document.getElementById('histRawResponse'));
+
+      // Keyboard selection (shift+arrows)
+      document.addEventListener('keyup', (e) => {
+        if (e.key === 'Shift' || e.key.startsWith('Arrow')) {
+          selecting = false;
+          tryShow();
+        }
+      });
+
+      // Hide immediately when clicking outside bar/preview/raw
+      document.addEventListener('mousedown', (e) => {
+        const t = e.target;
+        if (!t || !t.closest) return;
+        if (t.closest('#selDecodeBar') || t.closest('#selDecodePreview')) return;
+        if (t.closest('#rawResponse, #histRawResponse, pre.raw-response')) {
+          // starting a new selection — hide old bar right away
+          hideSelDecodeUI();
+          selecting = true;
+          return;
+        }
+        hideSelDecodeUI();
+      }, true);
+
+      document.addEventListener('scroll', (e) => {
+        const t = e.target;
+        if (t && t.closest && (t.closest('#selDecodeBar') || t.closest('#selDecodePreview'))) return;
+        hideSelDecodeUI();
+      }, true);
+      window.addEventListener('resize', () => hideSelDecodeUI());
+
+      const more = document.getElementById('selDecodeMore');
+      if (more) {
+        more.addEventListener('mousedown', (e) => e.preventDefault());
+        more.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const t = _selDecodeState.text || '';
+          hideSelDecodeUI();
+          if (typeof openConverter === 'function') openConverter(t);
+        });
+      }
+
+      document.getElementById('selDecodePreviewClose')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        const prev = document.getElementById('selDecodePreview');
+        if (prev) prev.hidden = true;
+        _selDecodeState.active = null;
+        document.querySelectorAll('.sel-decode-chip.is-active').forEach((c) => c.classList.remove('is-active'));
+      });
+
+      document.getElementById('selDecodeCopy')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const body = document.getElementById('selDecodePreviewBody');
+        const t = body ? body.textContent : '';
+        if (!t) return;
+        try {
+          await navigator.clipboard.writeText(t);
+          showToast('Copied', 'success');
+        } catch (err) {
+          showToast('Copy failed');
+        }
+      });
+
+      document.getElementById('selDecodeUse')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        const body = document.getElementById('selDecodePreviewBody');
+        const t = (body && body.textContent) || _selDecodeState.text || '';
+        hideSelDecodeUI();
+        if (typeof openConverter === 'function') openConverter(t);
+      });
+
+      // Auto-decode full raw body
+      bindRawAutoDecode();
+
+      console.info('[sel-decode] bound');
+    }
+
+    function isMostlyPrintable(s) {
+      if (!s) return false;
+      const bad = (String(s).match(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g) || []).length;
+      return bad <= Math.max(1, s.length * 0.03);
+    }
+
+    function autoDecodeRawText(text) {
+      const src = String(text || '');
+
+      // Whole-body only when the body itself looks encoded
+      const looksWhole = {
+        url: /%[0-9a-fA-F]{2}/.test(src) && !/\s{2,}/.test(src) && (src.match(/%[0-9a-fA-F]{2}/g) || []).length >= Math.max(3, Math.floor(src.length / 12)),
+        b64: /^[A-Za-z0-9+/=\s]{16,}$/.test(src.trim()) && src.trim().replace(/\s+/g, '').length % 4 === 0,
+        hex: /^(?:[0-9a-fA-F]{2}){4,}$/.test(src.trim().replace(/\s+/g, '')),
+        unicode: /(?:\\u[0-9a-fA-F]{4}){3,}/.test(src) && src.trim().length < 500,
+      };
+      for (const codec of ['url', 'b64', 'hex', 'unicode']) {
+        if (!looksWhole[codec]) continue;
+        const whole = selDecodeTry(codec, src, 'dec');
+        if (whole && isMostlyPrintable(whole) && whole !== src) {
+          return {
+            text: whole,
+            changes: 1,
+            mode: 'whole:' + codec,
+            segments: [{ start: 0, end: whole.length, original: src, decoded: whole, codec: codec }],
+          };
+        }
+      }
+
+      const patterns = [
+        // URL: token that contains at least one %XX (allows a%3D1%26b mixed)
+        { codec: 'url', re: /(?:[A-Za-z0-9\-._~!*'();:@&=+$,/?#[\]]|%[0-9a-fA-F]{2})*%[0-9a-fA-F]{2}(?:[A-Za-z0-9\-._~!*'();:@&=+$,/?#[\]]|%[0-9a-fA-F]{2})*/g },
+        // Unicode: one-or-more \uXXXX or \\uXXXX runs (JSON-escaped)
+        { codec: 'unicode', re: /(?:\\{1,2}u[0-9a-fA-F]{4}|\\{1,2}u\{[0-9a-fA-F]+\})+/gi },
+        // Base64
+        { codec: 'b64', re: /\b[A-Za-z0-9+/]{12,}={0,2}\b/g },
+        // Hex: at least 4 bytes (8 hex chars) — covers short flags like HEXFLAG
+        { codec: 'hex', re: /\b(?:[0-9a-fA-F]{2}){4,}\b/g },
+      ];
+
+      const candidates = [];
+      patterns.forEach((p) => {
+        p.re.lastIndex = 0;
+        let m;
+        while ((m = p.re.exec(src)) !== null) {
+          const original = m[0];
+          // Skip hex matches that are clearly part of a longer base64-looking token handled separately
+          if (p.codec === 'hex' && /[+/=]/.test(original)) continue;
+          const decoded = selDecodeTry(p.codec, original, 'dec');
+          if (!decoded || !isMostlyPrintable(decoded)) continue;
+          if (decoded === original) continue;
+          // Avoid "decoding" hex of pure ASCII digits that barely changes meaning when too short
+          if (p.codec === 'hex' && decoded.length < 3) continue;
+          candidates.push({
+            start: m.index,
+            end: m.index + original.length,
+            original: original,
+            decoded: decoded,
+            codec: p.codec,
+          });
+        }
+      });
+
+      candidates.sort((a, b) => a.start - b.start || (b.end - a.start) - (a.end - a.start));
+      const chosen = [];
+      let cursor = 0;
+      candidates.forEach((c) => {
+        if (c.start < cursor) return;
+        chosen.push(c);
+        cursor = c.end;
+      });
+
+      if (!chosen.length) {
+        return { text: src, changes: 0, mode: 'none', segments: [] };
+      }
+
+      // Build decoded text + segment ranges
+      let out = '';
+      const segments = [];
+      let last = 0;
+      chosen.forEach((c) => {
+        out += src.slice(last, c.start);
+        const segStart = out.length;
+        out += c.decoded;
+        segments.push({
+          start: segStart,
+          end: out.length,
+          original: c.original,
+          decoded: c.decoded,
+          codec: c.codec,
+        });
+        last = c.end;
+      });
+      out += src.slice(last);
+
+      // Merge adjacent segments (no gap) into one continuous highlight
+      const merged = [];
+      segments.forEach((s) => {
+        const prev = merged[merged.length - 1];
+        if (prev && prev.end === s.start) {
+          prev.end = s.end;
+          prev.decoded += s.decoded;
+          prev.original += s.original;
+          if (prev.codec !== s.codec) prev.codec = prev.codec + '+' + s.codec;
+        } else {
+          merged.push(Object.assign({}, s));
+        }
+      });
+
+      return { text: out, changes: chosen.length, mode: 'chunks', segments: merged };
+    }
+
+
+    let _rawOriginalHtml = null;
+    let _rawOriginalText = null;
+    let _rawDecoded = false;
+    let _rawDecSegments = [];
+    let _rawDecIndex = -1;
+    let _rawContentType = '';
+
+    function clearRawDecFocus() {
+      document.querySelectorAll('.raw-dec-chunk.is-focus').forEach((n) => n.classList.remove('is-focus'));
+    }
+
+    function updateRawDecNav() {
+      const wrap = document.getElementById('rawDecNavWrap');
+      const label = document.getElementById('rawDecNavLabel');
+      const n = _rawDecSegments.length;
+      if (wrap) wrap.hidden = n === 0;
+      if (label) label.textContent = n ? ((_rawDecIndex + 1) + '/' + n) : '0/0';
+    }
+
+    function focusRawDecChunk(i) {
+      const nodes = document.querySelectorAll('.raw-dec-chunk');
+      if (!nodes.length) return;
+      const idx = ((i % nodes.length) + nodes.length) % nodes.length;
+      _rawDecIndex = idx;
+      clearRawDecFocus();
+      const el = nodes[idx];
+      el.classList.add('is-focus');
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      updateRawDecNav();
+    }
+
+    function renderRawWithDecodedSegments(decodedText, segments, contentType) {
+      const el = document.getElementById('rawResponse');
+      if (!el) return;
+      const ct = contentType || _rawContentType || '';
+      const segs = (segments || []).slice().sort((a, b) => a.start - b.start);
+      // Only wrap decoded chunks — leave the rest as normal highlighted text
+      if (!segs.length) {
+        el.innerHTML = highlightCode(decodedText, ct);
+        return;
+      }
+      let html = '';
+      let last = 0;
+      segs.forEach((s, i) => {
+        if (s.start > last) {
+          html += highlightCode(decodedText.slice(last, s.start), ct);
+        }
+        const inner = highlightCode(s.decoded, ct);
+        const origAttr = escapeHtml(s.original).replace(/"/g, '&quot;');
+        const codecAttr = escapeHtml(s.codec || '');
+        html += '<span class="raw-dec-chunk" data-idx="' + i + '" data-codec="' + codecAttr + '" data-orig="' + origAttr + '">' + inner + '</span>';
+        last = s.end;
+      });
+      if (last < decodedText.length) {
+        html += highlightCode(decodedText.slice(last), ct);
+      }
+      el.innerHTML = html;
+      bindRawDecChunkHovers();
+    }
+
+    function bindRawDecChunkHovers() {
+      let tip = document.getElementById('rawDecTip');
+      if (!tip) {
+        tip = document.createElement('div');
+        tip.id = 'rawDecTip';
+        tip.className = 'raw-dec-tip';
+        tip.hidden = true;
+        document.body.appendChild(tip);
+      }
+      document.querySelectorAll('.raw-dec-chunk').forEach((node) => {
+        node.addEventListener('mouseenter', (e) => {
+          const orig = node.getAttribute('data-orig') || '';
+          const codec = node.getAttribute('data-codec') || '';
+          tip.innerHTML = '<span class="raw-dec-tip-label">Original · ' + escapeHtml(codec) + '</span>' + escapeHtml(orig);
+          tip.hidden = false;
+          const r = node.getBoundingClientRect();
+          const tw = tip.offsetWidth || 200;
+          const th = tip.offsetHeight || 40;
+          let left = r.left;
+          let top = r.top - th - 8;
+          if (top < 8) top = r.bottom + 8;
+          left = Math.max(8, Math.min(window.innerWidth - tw - 8, left));
+          tip.style.left = left + 'px';
+          tip.style.top = top + 'px';
+        });
+        node.addEventListener('mouseleave', () => { tip.hidden = true; });
+      });
+    }
+
+    function bindRawAutoDecode() {
+      if (window.__sqliRawAutoBound) return;
+      window.__sqliRawAutoBound = true;
+      const btn = document.getElementById('rawAutoDecodeBtn');
+      const restore = document.getElementById('rawRestoreBtn');
+      const hint = document.getElementById('rawAutoHint');
+      if (!btn) return;
+
+      btn.addEventListener('click', () => {
+        const el = document.getElementById('rawResponse');
+        if (!el) return;
+        const text = el.innerText || el.textContent || '';
+        if (!text.trim() || text === 'No response data.') {
+          showToast('No raw body');
+          return;
+        }
+        if (!_rawDecoded) {
+          _rawOriginalHtml = el.innerHTML;
+          _rawOriginalText = text;
+        }
+        const source = _rawOriginalText || text;
+        const result = autoDecodeRawText(source);
+        if (!result.changes) {
+          showToast('No encoded chunks detected');
+          if (hint) hint.textContent = 'nothing to decode';
+          return;
+        }
+        _rawDecSegments = result.segments || [];
+        _rawDecIndex = _rawDecSegments.length ? 0 : -1;
+        renderRawWithDecodedSegments(result.text, _rawDecSegments, _rawContentType);
+        _rawDecoded = true;
+        if (restore) restore.hidden = false; // only after successful decode
+        updateRawDecNav(); // shows ‹ n/n › only when segments.length > 0
+        // Focus first chunk without implying the whole body is selected
+        if (_rawDecSegments.length) focusRawDecChunk(0);
+        if (hint) hint.textContent = result.changes + ' decode(s) · ' + result.mode;
+        showToast('Auto-decoded (' + result.changes + ')', 'success');
+      });
+
+      restore?.addEventListener('click', () => {
+        const el = document.getElementById('rawResponse');
+        if (!el || _rawOriginalHtml == null) return;
+        el.innerHTML = _rawOriginalHtml;
+        _rawDecoded = false;
+        _rawDecSegments = [];
+        _rawDecIndex = -1;
+        restore.hidden = true;
+        updateRawDecNav();
+        const tip = document.getElementById('rawDecTip');
+        if (tip) tip.hidden = true;
+        if (hint) hint.textContent = '';
+        showToast('Original restored');
+      });
+
+      document.getElementById('rawDecPrev')?.addEventListener('click', () => {
+        if (!_rawDecSegments.length) return;
+        focusRawDecChunk(_rawDecIndex - 1);
+      });
+      document.getElementById('rawDecNext')?.addEventListener('click', () => {
+        if (!_rawDecSegments.length) return;
+        focusRawDecChunk(_rawDecIndex + 1);
+      });
+    }
+
     function init() {
+      applyResetOnReloadIfNeeded();
       startBackendHealthLoop();
       bindPayloadLibraryUI();
       initAppearanceControls();
@@ -7689,7 +8673,9 @@ img, video, canvas { opacity: 0.9; }
       urlInput.value = '';
       payloadInput.value = '';
       loadPayloadDraft();
-      refreshAttackPanel();
+      if (typeof window.refreshAttackPanel === 'function') {
+        try { window.refreshAttackPanel(); } catch (e) { console.warn(e); }
+      }
       // Show shortcut hints on nav buttons
       const hint = (id) => formatShortcut(shortcuts[id] || {});
       const np = $('#navPayloadBtn'); if (np) np.title = 'Payload (' + hint('openPayload') + ')';
@@ -7702,6 +8688,8 @@ img, video, canvas { opacity: 0.9; }
 
       bindPanelPopoutButtons();
       bindPayloadToolsMenu();
+      bindSelectionDecodeBar();
+      bindSessionManagerUI();
       bindPayloadDraftSync();
       bindTargetUrlSync();
       bindCrossTabSync();
