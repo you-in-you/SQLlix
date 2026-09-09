@@ -286,11 +286,13 @@
     </div>
     <div class="vpanel-body" style="padding:12px 14px;">
       <div class="payload-input-wrap">
+        <pre class="payload-highlight" id="payloadHighlight" aria-hidden="true"></pre>
         <textarea id="payloadInput" class="payload-textarea"
           placeholder="' OR '1'='1' -- -&#10;order by {1..10}&#10;UNION SELECT {1,2,3,4,5}" spellcheck="false"
           title="Each line maps to $1, $2, $3... · Use {1..10} or {1,2,3} for batch attack"
           style="min-height:88px;max-height:180px;"></textarea>
         <button type="button" class="payload-save-btn" id="payloadSaveBtn" title="Save payload to library">Save</button>
+        <button type="button" class="payload-save-btn payload-clear-btn" id="clearPayloadBtn" title="Clear payload lines">Clear</button>
         <button type="button" class="payload-attack-btn hidden" id="payloadAttackBtn" title="Attack config — threads, delay, stop conditions">Attack</button>
         <div id="autocompleteBox" class="autocomplete-box hidden"></div>
       </div>
@@ -319,7 +321,6 @@
         <button type="button" id="converterBtnEmbed" class="btn btn-sm payload-embed-tool" title="Open converter" style="border-color:var(--accent-cyan);color:var(--accent-cyan);">Converter</button>
         <button type="button" id="payloadLibraryBtnEmbed" class="btn btn-sm payload-embed-tool" title="Saved payloads">Saved</button>
         <button type="button" id="charTableBtnEmbed" class="btn btn-sm payload-embed-tool" title="Character table">Tables</button>
-        <button id="clearPayloadBtn" class="btn btn-sm btn-ghost">Clear</button>
         <button type="button" id="payloadSendBtn" class="btn btn-sm btn-primary payload-send-btn" title="Send Request (Ctrl+Enter) — same as top bar">
           <span class="btn-text">Send Request</span>
           <span class="spinner"></span>
@@ -508,6 +509,13 @@
           <div class="tools-list-desc">Upstream proxy, traffic stats, live ping</div>
           <div class="tools-list-meta"><span>Open →</span></div>
         </button>
+        <button type="button" class="tools-list-item" data-open-tool="notes">
+          <div class="tools-list-top">
+            <strong>Notes</strong>
+          </div>
+          <div class="tools-list-desc">Quick notes, pin &amp; search your session scribbles</div>
+          <div class="tools-list-meta"><span>Open →</span></div>
+        </button>
       </div>
     </div>
   </div>
@@ -597,6 +605,92 @@
   <!-- ===== Saved Payloads (independent float — pin / resize) ===== -->
   
   <!-- ===== Converter (independent float — pin / resize) ===== -->
+  <!-- ===== TOOL: Notes — markdown board ===== -->
+  <div class="vpanel float-center tool-float" id="notesPanel" data-panel="notes">
+    <div class="resize-grip n" data-resize="n"></div>
+    <div class="resize-grip s" data-resize="s"></div>
+    <div class="resize-grip e" data-resize="e"></div>
+    <div class="resize-grip w" data-resize="w"></div>
+    <div class="resize-grip ne" data-resize="ne"></div>
+    <div class="resize-grip nw" data-resize="nw"></div>
+    <div class="resize-grip se" data-resize="se"></div>
+    <div class="resize-grip sw" data-resize="sw"></div>
+    <div class="vpanel-header" id="notesDragHandle">
+      <h2>Notes</h2>
+      <div class="vpanel-header-actions">
+        <div class="vpanel-close-cluster" title="Hover for more actions">
+          <div class="vpanel-close-tray">
+            <div class="vpanel-close-extras">
+              <div class="vpanel-close-extras-inner">
+                <button type="button" class="pin-btn vpanel-action-btn" id="notesPinBtn" title="Pin panel">⊙</button>
+                <button type="button" class="pin-btn shelf-btn vpanel-action-btn" id="notesShelfBtn" title="Minimize to tray" hidden>↙</button>
+                <button type="button" class="pin-btn popout-btn vpanel-action-btn" id="notesPopoutBtn" title="Open in new tab">↗</button>
+              </div>
+            </div>
+            <button type="button" class="vpanel-close" data-close-panel title="Close">×</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="vpanel-body notes-board">
+      <div class="notes-board-bar">
+        <div class="notes-board-tabs" id="notesBoardTabs"></div>
+        <button type="button" class="notes-board-add" id="notesAddBtn" title="New board">+</button>
+      </div>
+      <div class="notes-insert-bar" id="notesInsertBar">
+        <div class="notes-cluster" data-cluster="draw">
+          <button type="button" class="notes-cluster-trigger" id="notesDrawBtn">Draw</button>
+          <div class="notes-cluster-tray">
+            <button type="button" class="notes-ins" data-snip="h2" title="Heading">H2</button>
+            <button type="button" class="notes-ins" data-snip="bold" title="Bold">B</button>
+            <button type="button" class="notes-ins" data-snip="italic" title="Italic">I</button>
+            <button type="button" class="notes-ins" data-snip="code" title="Inline code">`</button>
+            <button type="button" class="notes-ins" data-snip="codeblock" title="Code block">Code</button>
+            <button type="button" class="notes-ins" data-snip="table" title="Table">Table</button>
+            <button type="button" class="notes-ins" data-snip="tasks" title="Checklist">Tasks</button>
+            <button type="button" class="notes-ins" data-snip="quote" title="Quote">Quote</button>
+            <button type="button" class="notes-ins" data-snip="note" title="NOTE">Note</button>
+            <button type="button" class="notes-ins" data-snip="warn" title="WARNING">Warn</button>
+            <button type="button" class="notes-ins" data-snip="hr" title="Divider">—</button>
+            <button type="button" class="notes-ins" data-snip="link" title="Link">Link</button>
+          </div>
+        </div>
+        <div class="notes-cluster" data-cluster="save">
+          <button type="button" class="notes-cluster-trigger" id="notesSaveMenuBtn">Save</button>
+          <div class="notes-cluster-tray">
+            <button type="button" class="notes-ins" id="notesCopyMdBtn" title="Copy Markdown">Copy MD</button>
+            <button type="button" class="notes-ins" id="notesCopyHtmlBtn" title="Copy HTML">Copy HTML</button>
+            <button type="button" class="notes-ins" id="notesExportMdBtn" title="Download .md">.md</button>
+            <button type="button" class="notes-ins" id="notesExportHtmlBtn" title="Download .html">.html</button>
+            <button type="button" class="notes-ins" id="notesPrintBtn" title="Print / PDF">Print</button>
+          </div>
+        </div>
+        <div class="notes-cluster" data-cluster="view">
+          <button type="button" class="notes-cluster-trigger" id="notesViewBtn">View</button>
+          <div class="notes-cluster-tray">
+            <button type="button" class="notes-ins" data-notes-view="live" title="Write in rendered view">Live</button>
+            <button type="button" class="notes-ins" data-notes-view="split" title="Split">Split</button>
+            <button type="button" class="notes-ins" data-notes-view="editor" title="Editor only">Edit</button>
+            <button type="button" class="notes-ins" data-notes-view="preview" title="Preview only">Preview</button>
+            <button type="button" class="notes-ins" data-notes-view="focus" title="Fullscreen">Focus</button>
+            <button type="button" class="notes-ins" id="notesScrollSyncBtn" title="Scroll sync" aria-pressed="true">Sync</button>
+          </div>
+        </div>
+      </div>
+      <div class="notes-slash-menu" id="notesSlashMenu" hidden></div>
+      <div class="notes-split" id="notesSplit">
+
+        <textarea id="notesBody" class="notes-md-input" placeholder="# Board&#10;&#10;Write **markdown** live…&#10;&#10;- lists&#10;- `code`&#10;- [links](https://)" spellcheck="true"></textarea>
+        <div class="notes-splitter" id="notesSplitter" title="Drag to resize"></div>
+        <div class="notes-md-preview" id="notesPreview" aria-label="Markdown preview" contenteditable="false" spellcheck="true"></div>
+      </div>
+      <div class="notes-status-bar">
+        <span id="notesStats">0 words · 0 chars · 0 lines</span>
+        <span id="notesMeta" class="notes-board-status">autosave</span>
+      </div>
+    </div>
+  </div>
+
   <div class="vpanel float-center tool-float" id="converterPanel" data-panel="converter">
     <div class="resize-grip n" data-resize="n"></div>
     <div class="resize-grip s" data-resize="s"></div>
@@ -1577,11 +1671,19 @@
     </div>
   </div>
 
+  <div id="cmdPalette" class="cmd-palette" hidden>
+    <div class="cmd-palette-box">
+      <input type="text" id="cmdPaletteInput" class="cmd-palette-input" placeholder="Jump to… settings, cookie, payload, notes…" autocomplete="off" spellcheck="false" />
+      <div id="cmdPaletteList" class="cmd-palette-list" role="listbox"></div>
+      <div class="cmd-palette-hint">↑↓ navigate · Enter open · Esc close · Alt+J</div>
+    </div>
+  </div>
   <script src="js/app.js"></script>
   <script src="js/attack.js"></script>
   <script src="js/proxy.js"></script>
   <script src="js/welcome.js"></script>
   <!-- TEMP UI debugger — delete this line + static/js/ui-debugger.js to remove -->
   <script src="js/ui-debugger.js"></script>
+  
 </body>
 </html>

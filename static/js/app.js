@@ -1535,6 +1535,8 @@
     // ===== Payload Utils (line-by-line + selection-aware) =====
     function mapPayloadText(text, fn) {
       return String(text || '').split('\n').map((line) => {
+        // Comment lines (# ...) stay untouched — not encoded/decoded
+        if (/^\s*#/.test(line)) return line;
         try { return fn(line); } catch { return line; }
       }).join('\n');
     }
@@ -1556,19 +1558,52 @@
       if (typeof refreshAttackPanel === 'function') refreshAttackPanel();
       showToast(okMsg || 'Done', 'success');
     }
-    urlEncodeBtn.addEventListener('click', () => {
-      applyToPayloadOrSelection(
-        (line) => encodeURIComponent(line).replace(/%20/g, '+'),
-        'URL Encoded'
-      );
-    });
-    urlDecodeBtn.addEventListener('click', () => {
-      applyToPayloadOrSelection(
-        (line) => decodeURIComponent(String(line).replace(/\+/g, ' ')),
-        'URL Decoded'
-      );
-    });
-    clearPayloadBtn.addEventListener('click', () => { payloadInput.value = ''; payloadInput.focus(); });
+    function bindPayloadEncodeDecode() {
+      const encBtn = document.getElementById('urlEncodeBtn');
+      const decBtn = document.getElementById('urlDecodeBtn');
+      const clrBtn = document.getElementById('clearPayloadBtn');
+      if (encBtn && !encBtn.dataset.bound) {
+        encBtn.dataset.bound = '1';
+        encBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          applyToPayloadOrSelection(
+            (line) => encodeURIComponent(line).replace(/%20/g, '+'),
+            'URL Encoded'
+          );
+          if (typeof renderPayloadHighlight === 'function') renderPayloadHighlight();
+        });
+      }
+      if (decBtn && !decBtn.dataset.bound) {
+        decBtn.dataset.bound = '1';
+        decBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          applyToPayloadOrSelection(
+            (line) => {
+              try { return decodeURIComponent(String(line).replace(/\+/g, ' ')); }
+              catch { return line; }
+            },
+            'URL Decoded'
+          );
+          if (typeof renderPayloadHighlight === 'function') renderPayloadHighlight();
+        });
+      }
+      if (clrBtn && !clrBtn.dataset.bound) {
+        clrBtn.dataset.bound = '1';
+        clrBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (payloadInput) {
+            payloadInput.value = '';
+            payloadInput.focus();
+          }
+          if (typeof renderPayloadHighlight === 'function') renderPayloadHighlight();
+          if (typeof updatePayloadSummary === 'function') updatePayloadSummary();
+        });
+      }
+    }
+    bindPayloadEncodeDecode();
 
     // ===== Converter (overlay on Payload) =====
     let converterCodec = 'url';
@@ -1888,20 +1923,24 @@
     // Tools search / filter (history-style)
     // Tools list — search only (no category chips)
     (function bindToolsListSearch() {
-      const search = $('#toolsSearch');
-      const list = $('#toolsPickerList');
+      const search = document.getElementById('toolsSearch');
+      const list = document.getElementById('toolsPickerList');
       if (!list) return;
       const apply = () => {
         const q = ((search && search.value) || '').trim().toLowerCase();
         list.querySelectorAll('.tools-list-item, .tools-picker-item').forEach((el) => {
-          const text = (el.textContent || '').toLowerCase();
-          const qOk = !q || text.includes(q);
-          el.classList.toggle('hidden', !qOk);
-          el.style.display = qOk ? '' : 'none';
+          const hay = ((el.textContent || '') + ' ' + (el.getAttribute('data-open-tool') || '')).toLowerCase();
+          el.style.display = (!q || hay.includes(q)) ? '' : 'none';
         });
       };
-      if (search) search.addEventListener('input', apply);
+      if (search) {
+        search.addEventListener('input', apply);
+        search.addEventListener('keyup', apply);
+        search.addEventListener('search', apply);
+      }
+      apply();
     })();
+
 
 
 
@@ -2966,11 +3005,12 @@
 
         const pathLabel = getUrlPath(item.url);
         const displayName = item.name || pathLabel;
-        // Prefer payload token, then a short body hint, then URL
+        // Only show payload snippet when this request actually used a payload ($/batch/attack)
         let snippet = '';
-        if (item.payload) snippet = String(item.payload).slice(0, 55);
-        else if (item.postBody) snippet = String(item.postBody).replace(/\s+/g, ' ').slice(0, 55);
-        else snippet = String(item.url || '').slice(0, 55);
+        const payloadWasUsed = !!(item.payloadUsed || item.batchId || item.attackIndex != null);
+        if (payloadWasUsed && item.payload) {
+          snippet = String(item.payload).slice(0, 55);
+        }
         const statusLabel = item.response.status === 0 ? 'ERR' : item.response.status;
         const bodySize = (item.response.body || '').length;
         const sizeLabel = formatBytes(bodySize);
@@ -3366,10 +3406,17 @@
           state.historyStatusFilter = 'all';
           if (historyStatusFilter) historyStatusFilter.value = 'all';
         }
-        if (typeof renderHfChips === 'function') renderHfChips();
         showToast('Attack cleared (0 requests)');
       } else {
         showToast('Deleted');
+      }
+      // Always refresh attack picker counts / hf chips after any delete
+      if (typeof renderHfChips === 'function') renderHfChips();
+      if (typeof getKnownAttacks === 'function') {
+        const ov = document.getElementById('atkPickerOverlay');
+        if (ov && ov.classList.contains('open') && typeof openAttackPicker === 'function') {
+          openAttackPicker();
+        }
       }
       renderHistory();
       if (typeof scheduleHistorySave === 'function') scheduleHistorySave();
@@ -3546,6 +3593,12 @@
         clearResponseView();
       }
       renderHistory();
+      const mc = document.getElementById('hfMatchCount');
+      if (mc) {
+        const total = state.history.length;
+        mc.innerHTML = total ? ('Showing <strong>' + total + '</strong> / ' + total) : '';
+      }
+      if (typeof renderHfChips === 'function') renderHfChips();
       if (typeof scheduleHistorySave === 'function') scheduleHistorySave();
       showToast(removed ? `Cleared ${removed} unpinned item(s)` : 'Nothing to clear (all pinned)');
     });
@@ -3637,12 +3690,52 @@
       const raw = urlInput.value.trim();
       let resolved = raw;
       try {
-        if (typeof detectAttackMode === 'function' && typeof applySinglePayload === 'function') {
-          const { payloads } = detectAttackMode();
-          if (payloads.length > 0 && raw.includes('$')) {
-            resolved = applySinglePayload(raw, payloads[0].text);
+        if (typeof detectAttackMode === 'function') {
+          const mode = detectAttackMode();
+          if (mode && mode.mode === 'dollar' && mode.slots && mode.slots.length) {
+            // Build a sample map from each $ slot's first expanded value
+            const map = {};
+            const cfg = (state.attackSlotConfig && state.attackSlotConfig.slots) || {};
+            mode.slots.forEach((n) => {
+              let sample = '$' + n;
+              try {
+                const segs = (cfg[n] && cfg[n].segments) || [{ type: 'range', from: '1', to: '1' }];
+                let vals = [];
+                if (typeof expandScopeSegment === 'function') {
+                  segs.forEach((seg) => { vals = vals.concat(expandScopeSegment(seg) || []); });
+                } else if (segs[0]) {
+                  if (segs[0].type === 'range') vals = [String(segs[0].from || '1')];
+                  else if (segs[0].type === 'list') {
+                    vals = String(segs[0].values || segs[0].items || '').split(',').map((x) => String(x).trim()).filter(Boolean);
+                  } else if (segs[0].type === 'specials') vals = ['!'];
+                }
+                if (vals.length) sample = String(vals[0]);
+              } catch (e) {}
+              map[n] = sample;
+            });
+            if (typeof applyDollarMap === 'function') {
+              resolved = applyDollarMap(raw, map);
+            }
+            // Also substitute $n in payload lines if body embeds payload text via $1 meaning line
+            if (resolved === raw && typeof applyPayloadPlaceholders === 'function') {
+              // Prefer dollar-map on payload first, then into body
+              const pl = (payloadInput && payloadInput.value) || '';
+              const mappedPl = applyDollarMap(pl, map);
+              const lines = mappedPl.split('\n');
+              resolved = raw.replace(/\$(\d+)/g, (match, num) => {
+                const idx = parseInt(num, 10) - 1;
+                if (Object.prototype.hasOwnProperty.call(map, parseInt(num, 10))) return String(map[parseInt(num, 10)]);
+                if (idx >= 0 && idx < lines.length) return lines[idx];
+                return match;
+              });
+            }
+          } else if (mode && mode.mode === 'brace' && mode.payloads && mode.payloads.length) {
+            const payloads = mode.payloads;
+            if (typeof applySinglePayload === 'function') {
+              resolved = applySinglePayload(raw, payloads[0].text);
+            }
             if (payloads.length > 1) {
-              resolved += `   (+${payloads.length - 1} more in batch)`;
+              resolved += '\n\n(+' + (payloads.length - 1) + ' more in batch)';
             }
           } else if (typeof applyPayloadPlaceholders === 'function') {
             resolved = applyPayloadPlaceholders(raw);
@@ -5401,8 +5494,9 @@ img, video, canvas { opacity: 0.9; }
       'attack-scope': '#attackScopePanel',
       'attack-slot-stop': '#attackSlotStopPanel',
       'attack-combos': '#attackCombosPanel',
+      notes: '#notesPanel',
     };
-    const PINNABLE = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib', 'converter']);
+    const PINNABLE = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib', 'converter', 'notes']);
     const PIN_BTN_SEL = {
       payload: '#payloadPinBtn',
       history: '#historyPinBtn',
@@ -5412,6 +5506,7 @@ img, video, canvas { opacity: 0.9; }
       tools: '#toolsPinBtn',
       'payload-lib': '#payloadLibPinBtn',
       converter: '#converterPinBtn',
+      notes: '#notesPinBtn',
     };
     // Per-panel minimize (shelf) — inverse of ↗; only while pinned
     const SHELF_BTN_SEL = {
@@ -5423,6 +5518,7 @@ img, video, canvas { opacity: 0.9; }
       tools: '#toolsShelfBtn',
       'payload-lib': '#payloadLibShelfBtn',
       converter: '#converterShelfBtn',
+      notes: '#notesShelfBtn',
     };
 
     function updateShelfBtn(name) {
@@ -5516,7 +5612,7 @@ img, video, canvas { opacity: 0.9; }
 
       // Pin = never auto-close. Work panels stack (don't kill each other).
       const MODALS = new Set(['settings', 'adv-filter', 'attack-dialog', 'attack-config', 'hist-response', 'cookie-bulk-import', 'cookie-bulk-export', 'attack-scope', 'attack-slot-stop', 'attack-combos', 'session-mgr']);
-      const WORK = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'tools', 'payload-lib', 'converter']);
+      const WORK = new Set(['payload', 'history', 'cheatsheet', 'proxy', 'tools', 'payload-lib', 'converter', 'notes']);
 
       Object.keys(VPANEL_MAP).forEach((k) => {
         if (k === name) return;
@@ -5704,6 +5800,8 @@ img, video, canvas { opacity: 0.9; }
       const panel = $(VPANEL_MAP[name]);
       if (!panel) return;
       defaults = defaults || PIN_DEFAULTS[name] || {};
+      // Capture visual box BEFORE toggling .pinned (CSS would change layout)
+      const rectBefore = on ? panel.getBoundingClientRect() : null;
       panel.classList.toggle('pinned', !!on);
       const pinBtn = PIN_BTN_SEL[name] ? $(PIN_BTN_SEL[name]) : null;
       if (pinBtn) {
@@ -5717,24 +5815,33 @@ img, video, canvas { opacity: 0.9; }
       if (on) {
         // Pinned windows stay open (otherwise ↓ never appears)
         panel.classList.add('open');
-        // Always ensure pinned geometry (drawers otherwise stay full-height)
+        const rect = rectBefore;
         panel.style.position = 'fixed';
         panel.style.transform = 'none';
         panel.style.bottom = 'auto';
-        if (!panel.style.top) panel.style.top = defaults.top || '80px';
-        if (!panel.style.left && !panel.style.right) {
-          if (defaults.right) {
-            panel.style.right = defaults.right;
-            panel.style.left = 'auto';
-          } else {
-            panel.style.left = defaults.left || '16px';
-            panel.style.right = 'auto';
+        panel.style.margin = '0';
+        if (rect && rect.width > 0) {
+          panel.style.top = Math.max(8, Math.round(rect.top)) + 'px';
+          panel.style.left = Math.max(8, Math.round(rect.left)) + 'px';
+          panel.style.right = 'auto';
+          panel.style.width = Math.round(Math.max(280, rect.width)) + 'px';
+          panel.style.height = Math.round(Math.max(200, rect.height)) + 'px';
+        } else {
+          if (!panel.style.top) panel.style.top = defaults.top || '80px';
+          if (!panel.style.left && !panel.style.right) {
+            if (defaults.right) {
+              panel.style.right = defaults.right;
+              panel.style.left = 'auto';
+            } else {
+              panel.style.left = defaults.left || '16px';
+              panel.style.right = 'auto';
+            }
           }
+          if (!panel.style.width) panel.style.width = defaults.width || '360px';
+          if (!panel.style.height) panel.style.height = defaults.height || Math.min(window.innerHeight * 0.7, 620) + 'px';
         }
-        if (!panel.style.width) panel.style.width = defaults.width || '360px';
-        if (!panel.style.height) panel.style.height = defaults.height || Math.min(window.innerHeight * 0.7, 620) + 'px';
         // Drawers: force float metrics when pinned
-        if (name === 'history' || name === 'tools') {
+        if (name === 'history' || name === 'tools' || name === 'notes') {
           panel.style.bottom = 'auto';
           if (!panel.style.height) panel.style.height = Math.min(window.innerHeight * 0.7, 620) + 'px';
         }
@@ -5997,7 +6104,7 @@ img, video, canvas { opacity: 0.9; }
       });
     }
 
-    ['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib', 'converter'].forEach((name) => {
+    ['payload', 'history', 'cheatsheet', 'proxy', 'settings', 'tools', 'payload-lib', 'converter', 'notes'].forEach((name) => {
       const sel = PIN_BTN_SEL[name];
       const btn = sel ? $(sel) : null;
       if (!btn) return;
@@ -6026,6 +6133,7 @@ img, video, canvas { opacity: 0.9; }
     setupPinnedDrag('#converterPanel', '#converterDragHandle');
     setupPinnedDrag('#settingsPanel', '#settingsDragHandle');
     setupPinnedDrag('#toolsPanel', '#toolsDragHandle');
+    setupPinnedDrag('#notesPanel', '#notesDragHandle');
     setupPinnedResize('#payloadWorkbench');
     setupPinnedResize('#historyPanel');
     setupPinnedResize('#cheatSheetPanel');
@@ -6540,8 +6648,9 @@ img, video, canvas { opacity: 0.9; }
         name: null,
         method,
         url,
-        originalUrl: urlInput.value.trim(),
+        originalUrl: (urlInput && urlInput.value || '').trim(),
         payload: payloadText,
+        payloadUsed: !!(opts.payloadUsed || batchId || attackIndex != null),
         postBody: postBody || '',
         headers: { ...customHeaders },
         response: respData,
@@ -6583,7 +6692,7 @@ img, video, canvas { opacity: 0.9; }
       }
     }
 
-    async function sendRequest() {
+    async function sendRequest(ev) {
       // Attack running → same button stops the attack
       if (state.attack.active) {
         state.attack.stop = true;
@@ -6591,8 +6700,9 @@ img, video, canvas { opacity: 0.9; }
         showToast('Stopping attack…');
         return;
       }
-      // Cancel in-flight single request (same button acts as Cancel)
-      if (state.isSending && !state.attack.active) {
+      // Cancel ONLY when user clicks the Send/Cancel button (not plain Enter)
+      const isClick = ev && (ev.type === 'click' || ev.type === 'pointerup');
+      if (state.isSending && !state.attack.active && isClick) {
         if (state._sendAbort) {
           try { state._sendAbort.abort(); } catch {}
         }
@@ -6643,13 +6753,14 @@ img, video, canvas { opacity: 0.9; }
       const payload = payloadInput.value.trim();
       let postBody = postBodyInput ? postBodyInput.value : '';
 
+      const payloadUsed = /\$\d+/.test(url) || /\$\d+/.test(postBody);
       const finalUrl = applyPayloadPlaceholders(url);
       postBody = applyPayloadPlaceholders(postBody);
       const customHeaders = buildRequestHeaders(postBody);
 
       const entry = await executeOneRequest(
-        finalUrl, method, postBody, customHeaders, payload, null, null, null,
-        { signal: state._sendAbort.signal }
+        finalUrl, method, postBody, customHeaders, payloadUsed ? payload : '', null, null, null,
+        { signal: state._sendAbort.signal, payloadUsed }
       );
       state._sendAbort = null;
       state.activeHistoryId = entry.id;
@@ -6698,11 +6809,11 @@ img, video, canvas { opacity: 0.9; }
       });
     }
 
-    sendBtn.addEventListener('click', sendRequest);
+    sendBtn.addEventListener('click', (e) => sendRequest(e));
     $('#payloadSendBtn')?.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      sendRequest();
+      sendRequest(e);
     });
     $('#payloadAttackBtn')?.addEventListener('click', (e) => {
       e.preventDefault();
@@ -6719,11 +6830,12 @@ img, video, canvas { opacity: 0.9; }
         cancelInFlightRequest();
         return;
       }
-      // Plain Enter → send, only when focus is on URL (payload textarea needs newline)
+      // Plain Enter → send (never cancel). Only from URL field.
       const t = e.target;
       if (t && (t.id === 'urlInput' || t.classList.contains('url-input'))) {
         e.preventDefault();
-        sendRequest();
+        if (state.isSending) return; // wait for current request; Cancel is Ctrl+Enter or button
+        sendRequest({ type: 'keydown' });
       }
     });
 
@@ -8650,6 +8762,1232 @@ img, video, canvas { opacity: 0.9; }
       });
     }
 
+
+    // ===== Notes manager (markdown board) =====
+    const NOTES_KEY = 'sqllix_notes_v1';
+    let _notesActiveId = null;
+    let _notesSaveTimer = null;
+
+    function loadNotes() {
+      try {
+        const raw = localStorage.getItem(NOTES_KEY);
+        const arr = raw ? JSON.parse(raw) : [];
+        return Array.isArray(arr) ? arr : [];
+      } catch (e) { return []; }
+    }
+    function saveNotes(list) {
+      try { localStorage.setItem(NOTES_KEY, JSON.stringify(list)); } catch (e) {}
+    }
+    function ensureNotesSeed() {
+      let notes = loadNotes();
+      if (!notes.length) {
+        notes = [{
+          id: 'n_board1',
+          title: 'Board',
+          body: '# Board\n\nWrite **markdown** on the left — live preview on the right.\n\n- lists\n- `inline code`\n\n```\ncode block\n```\n',
+          updatedAt: Date.now(),
+          createdAt: Date.now(),
+        }];
+        saveNotes(notes);
+      }
+      // migrate: if title empty use first heading
+      notes.forEach((n) => {
+        if (!n.title || n.title === 'New note' || n.title === 'Untitled') {
+          const m = String(n.body || '').match(/^#\s+(.+)$/m);
+          if (m) n.title = m[1].trim().slice(0, 40);
+        }
+      });
+      return notes;
+    }
+
+
+    function detectCodeLang(code) {
+      const c = String(code || '');
+      const head = c.slice(0, 500);
+      if (/^\s*[{[]/.test(head) && /"[^"]+"\s*:/.test(head)) return 'json';
+      if (/^\s*</.test(head) && /<\/?[a-z]/i.test(head)) return 'html';
+      if (/\$[a-zA-Z_]|\becho\b|\bfi\b|\bdone\b/.test(head)) return 'bash';
+      if (/\b(SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|UNION)\b/i.test(head)) return 'sql';
+      if (/\b(def |import |print\(|elif |self\.)/.test(head)) return 'python';
+      if (/\b(function|const |let |=>|console\.|require\()/.test(head)) return 'javascript';
+      if (/[{};]\s*$/m.test(head) && /:\s*[^;]+;/.test(head) && !/\bfunction\b/.test(head)) return 'css';
+      return '';
+    }
+
+    function highlightFenceCode(code, lang) {
+      let s = escapeHtml(code);
+      const apply = (re, cls) => {
+        s = s.replace(re, (m) => '\0' + cls + '\0' + m + '\0/\0');
+      };
+      lang = (lang || '').toLowerCase();
+      if (lang === 'json') {
+        apply(/&quot;[^&]*&quot;(?=\s*:)/g, 'md-k');
+        apply(/&quot;[^&]*&quot;/g, 'md-s');
+        apply(/\b-?\d+(?:\.\d+)?\b/g, 'md-n');
+        apply(/\b(true|false|null)\b/g, 'md-kw');
+      } else if (lang === 'sql') {
+        apply(/\b(SELECT|FROM|WHERE|AND|OR|UNION|ALL|INSERT|INTO|VALUES|UPDATE|SET|DELETE|JOIN|LEFT|RIGHT|INNER|ON|AS|ORDER|BY|GROUP|LIMIT|OFFSET|HAVING|DISTINCT|CASE|WHEN|THEN|ELSE|END|LIKE|IN|IS|NULL|NOT|CREATE|TABLE|DROP|ALTER)\b/gi, 'md-kw');
+        apply(/&apos;[^&]*&apos;|&quot;[^&]*&quot;/g, 'md-s');
+        apply(/\b\d+\b/g, 'md-n');
+        apply(/--.*$/gm, 'md-c');
+      } else if (lang === 'python') {
+        apply(/(#.*)$/gm, 'md-c');
+        apply(/\b(def|class|return|import|from|as|if|elif|else|for|while|try|except|finally|with|yield|lambda|pass|break|continue|in|is|not|and|or|True|False|None)\b/g, 'md-kw');
+        apply(/&quot;[^&]*&quot;|&#39;[^&]*&#39;/g, 'md-s');
+        apply(/\b\d+(?:\.\d+)?\b/g, 'md-n');
+      } else if (lang === 'javascript' || lang === 'js' || lang === 'ts') {
+        apply(/(\/\/.*)$/gm, 'md-c');
+        apply(/\b(const|let|var|function|return|if|else|for|while|class|new|this|import|from|export|default|async|await|try|catch|throw|typeof|instanceof)\b/g, 'md-kw');
+        apply(/&quot;[^&]*&quot;|&#39;[^&]*&#39;/g, 'md-s');
+        apply(/\b\d+(?:\.\d+)?\b/g, 'md-n');
+      } else if (lang === 'html' || lang === 'xml') {
+        apply(/&lt;!--[\s\S]*?--&gt;/g, 'md-c');
+        apply(/(&lt;\/?[\w:-]+)/g, 'md-kw');
+        apply(/&quot;[^&]*&quot;/g, 'md-s');
+      } else if (lang === 'css') {
+        apply(/(\/\*[\s\S]*?\*\/)/g, 'md-c');
+        apply(/([.#]?[\w-]+)(?=\s*\{)/g, 'md-k');
+        apply(/#[0-9a-fA-F]{3,8}\b/g, 'md-n');
+      } else if (lang === 'bash' || lang === 'sh') {
+        apply(/(#.*)$/gm, 'md-c');
+        apply(/\b(if|then|fi|for|do|done|while|case|esac|echo|exit|export|source|cd|ls|grep|awk|sed)\b/g, 'md-kw');
+        apply(/&quot;[^&]*&quot;|&#39;[^&]*&#39;/g, 'md-s');
+      } else if (lang === 'http') {
+        apply(/^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\b/gm, 'md-kw');
+        apply(/^(HTTP\/[\d.]+|\d{3})\b/gm, 'md-n');
+        apply(/^([A-Za-z-]+):/gm, 'md-k');
+      } else {
+        apply(/(#.*|\/\/.*)$/gm, 'md-c');
+        apply(/&quot;[^&]*&quot;|&#39;[^&]*&#39;/g, 'md-s');
+        apply(/\b\d+\b/g, 'md-n');
+      }
+      s = s.replace(/\0([a-z-]+)\0([\s\S]*?)\0\/\0/g, '<span class="$1">$2</span>');
+      return s;
+    }
+
+    const NOTES_SNIPPETS = {
+      h2: { text: '## Heading\n\n', sel: [3, 10] },
+      bold: { wrap: ['**', '**'] },
+      italic: { wrap: ['*', '*'] },
+      code: { wrap: ['`', '`'] },
+      codeblock: { text: '```javascript\n// code\n```\n', sel: [3, 13] },
+      table: { text: '| Col A | Col B | Col C |\n| --- | --- | --- |\n| a1 | b1 | c1 |\n| a2 | b2 | c2 |\n\n' },
+      tasks: { text: '- [ ] Task one\n- [ ] Task two\n- [x] Done\n\n' },
+      quote: { text: '> quoted text\n\n', sel: [2, 14] },
+      note: { text: '> [!NOTE]\n> Details here\n\n' },
+      warn: { text: '> [!WARNING]\n> Watch out\n\n' },
+      hr: { text: '\n---\n\n' },
+      link: { text: '[label](https://)\n', sel: [1, 6] },
+      'tpl-meeting': { text: '' },
+      'tpl-sqli': { text: '# SQLi Finding\n\n**Target:** \n**Param:** \n**DBMS:** \n**Risk:** High\n\n## Payload\n```sql\n\' OR 1=1--\n```\n\n## Evidence\n| Step | Request | Result |\n| --- | --- | --- |\n| 1 |  |  |\n\n## Impact\n- \n\n## Remediation\n- \n\n' },
+      'tpl-http': { text: '## HTTP capture\n\n```http\nGET /path HTTP/1.1\nHost: example.com\n\n```\n\n**Status:** \n**Notes:** \n\n' },
+      'tpl-checklist': { text: '# Pentest checklist\n\n- [ ] Recon / subdomain enum\n- [ ] Tech fingerprint\n- [ ] Auth & session\n- [ ] Injection (SQLi / XSS / CMD)\n- [ ] Access control / IDOR\n- [ ] File upload\n- [ ] Business logic\n- [ ] Report draft\n\n' },
+    };
+
+    function notesGetCaretOffset(root) {
+      const sel = window.getSelection();
+      if (!sel || !sel.rangeCount || !root.contains(sel.anchorNode)) return 0;
+      const range = sel.getRangeAt(0).cloneRange();
+      const pre = range.cloneRange();
+      pre.selectNodeContents(root);
+      pre.setEnd(range.startContainer, range.startOffset);
+      return pre.toString().length;
+    }
+
+    function notesSetCaretOffset(root, offset) {
+      if (!root) return;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      let remaining = Math.max(0, offset | 0);
+      let node = null;
+      while ((node = walker.nextNode())) {
+        const len = node.textContent.length;
+        if (remaining <= len) {
+          const range = document.createRange();
+          range.setStart(node, remaining);
+          range.collapse(true);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          return;
+        }
+        remaining -= len;
+      }
+      const range = document.createRange();
+      range.selectNodeContents(root);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+
+    /** Sync live HTML → markdown textarea, optionally re-render markdown keeping caret. */
+    function notesLiveCommit(opts) {
+      opts = opts || {};
+      const prev = document.getElementById('notesPreview');
+      const body = document.getElementById('notesBody');
+      const split = document.getElementById('notesSplit');
+      if (!body || !split || !split.classList.contains('mode-live')) return;
+
+      const md = body.value || '';
+      updateNotesStats();
+      if (_notesActiveId) {
+        const notes = loadNotes();
+        const n = notes.find((x) => x.id === _notesActiveId);
+        if (n) {
+          n.body = md;
+          const hm = md.match(/^#\s+(.+)$/m);
+          if (hm) n.title = hm[1].trim().slice(0, 48);
+          n.updatedAt = Date.now();
+          saveNotes(notes);
+        }
+      }
+      // Preview layer only — never touch textarea/caret
+      if (opts.rerender !== false && prev) {
+        prev.innerHTML = renderMarkdownLite(md);
+      }
+      const meta = document.getElementById('notesMeta');
+      if (meta) meta.textContent = 'saved';
+    }
+
+    function notesInsertSnippet(key) {
+      const ta = document.getElementById('notesBody');
+      if (!ta) return;
+      const snip = NOTES_SNIPPETS[key];
+      if (!snip) return;
+      const split = document.getElementById('notesSplit');
+      const live = split && split.classList.contains('mode-live');
+      const prev = document.getElementById('notesPreview');
+
+      // Live uses the same textarea path — preview refreshes after insert
+      const start = ta.selectionStart || 0;
+      const end = ta.selectionEnd || 0;
+      const val = ta.value || '';
+      const selected = val.slice(start, end);
+      if (snip.wrap) {
+        const [a, b] = snip.wrap;
+        const inner = selected || 'text';
+        const next = val.slice(0, start) + a + inner + b + val.slice(end);
+        ta.value = next;
+        ta.focus();
+        if (!selected) ta.setSelectionRange(start + a.length, start + a.length + inner.length);
+        else ta.setSelectionRange(start + a.length + inner.length + b.length, start + a.length + inner.length + b.length);
+      } else {
+        let text = snip.text || '';
+        if (key === 'tpl-meeting') {
+          text = '# Meeting — ' + new Date().toLocaleDateString() + '\n\n**Attendees:** \n**Date:** ' + new Date().toLocaleString() + '\n\n## Agenda\n1. \n2. \n\n## Notes\n- \n\n## Action items\n| Owner | Task | Due |\n| --- | --- | --- |\n|  |  |  |\n\n';
+        }
+        const next = val.slice(0, start) + text + val.slice(end);
+        ta.value = next;
+        ta.focus();
+        if (snip.sel) ta.setSelectionRange(start + snip.sel[0], start + snip.sel[1]);
+        else {
+          const p = start + text.length;
+          ta.setSelectionRange(p, p);
+        }
+      }
+      ta.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    const NOTES_SLASH_ITEMS = [
+      { id: 'h2', label: 'Heading', hint: '##' },
+      { id: 'table', label: 'Table', hint: '3×3' },
+      { id: 'tasks', label: 'Checklist', hint: 'tasks' },
+      { id: 'codeblock', label: 'Code block', hint: '```' },
+      { id: 'note', label: 'Callout Note', hint: 'NOTE' },
+      { id: 'warn', label: 'Callout Warn', hint: 'WARN' },
+      { id: 'tpl-meeting', label: 'Meeting template', hint: 'tpl' },
+      { id: 'tpl-sqli', label: 'SQLi finding', hint: 'tpl' },
+      { id: 'tpl-http', label: 'HTTP log', hint: 'tpl' },
+      { id: 'tpl-checklist', label: 'Pentest checklist', hint: 'tpl' },
+    ];
+
+    function renderMarkdownLite(src) {
+      if (!src || !String(src).trim()) {
+        return '<p class="md-empty">Empty board — start typing markdown…</p>';
+      }
+      let s = String(src).replace(/\r\n/g, '\n');
+
+      // Protect fenced code blocks
+      const fences = [];
+      s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
+        const i = fences.length;
+        const clean = code.replace(/\n$/, '');
+        const detected = (lang || detectCodeLang(clean) || '').toLowerCase();
+        const body = (typeof highlightFenceCode === 'function') ? highlightFenceCode(clean, detected) : escapeHtml(clean);
+        const label = detected ? '<span class="md-lang">' + escapeHtml(detected) + '</span>' : '';
+        fences.push('<div class="md-code-wrap">' + label + '<pre class="md-code lang-' + escapeHtml(detected || 'text') + '"><code>' + body + '</code></pre></div>');
+        return '\u0000FENCE' + i + '\u0000';
+      });
+
+      // Tables (simple GFM): collect blocks of |...|
+      const tables = [];
+      s = s.replace(/(?:^|\n)((?:\|.+\|\n)+)/g, (full, block) => {
+        const lines = block.trim().split('\n').filter(Boolean);
+        if (lines.length < 2) return full;
+        const splitRow = (line) => line.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+        const header = splitRow(lines[0]);
+        let bodyStart = 1;
+        if (/^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?$/.test(lines[1])) bodyStart = 2;
+        let html = '<table class="md-table"><thead><tr>' + header.map((h) => '<th>' + escapeHtml(h) + '</th>').join('') + '</tr></thead><tbody>';
+        for (let i = bodyStart; i < lines.length; i++) {
+          const cells = splitRow(lines[i]);
+          html += '<tr>' + cells.map((c) => '<td>' + escapeHtml(c) + '</td>').join('') + '</tr>';
+        }
+        html += '</tbody></table>';
+        const ti = tables.length;
+        tables.push(html);
+        return '\n\u0000TABLE' + ti + '\u0000\n';
+      });
+
+      s = escapeHtml(s);
+
+      // Headings
+      s = s.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
+      s = s.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
+      s = s.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+      s = s.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+      s = s.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+      s = s.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+      // HR
+      s = s.replace(/^(-{3,}|\*{3,}|_{3,})$/gm, '<hr/>');
+
+      // Callouts + blockquotes
+      s = s.replace(/^&gt; \[!NOTE\]\s*(.*)$/gim, '<div class="md-callout md-callout-note"><div class="md-callout-title">NOTE</div><div class="md-callout-body">$1</div></div>');
+      s = s.replace(/^&gt; \[!TIP\]\s*(.*)$/gim, '<div class="md-callout md-callout-tip"><div class="md-callout-title">TIP</div><div class="md-callout-body">$1</div></div>');
+      s = s.replace(/^&gt; \[!IMPORTANT\]\s*(.*)$/gim, '<div class="md-callout md-callout-important"><div class="md-callout-title">IMPORTANT</div><div class="md-callout-body">$1</div></div>');
+      s = s.replace(/^&gt; \[!WARNING\]\s*(.*)$/gim, '<div class="md-callout md-callout-warn"><div class="md-callout-title">WARNING</div><div class="md-callout-body">$1</div></div>');
+      s = s.replace(/^&gt; \[!CAUTION\]\s*(.*)$/gim, '<div class="md-callout md-callout-caution"><div class="md-callout-title">CAUTION</div><div class="md-callout-body">$1</div></div>');
+      s = s.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+      // Task lists
+      s = s.replace(/^[\-\*] \[x\] (.+)$/gim, '<li class="md-task done"><span class="md-check">✓</span> $1</li>');
+      s = s.replace(/^[\-\*] \[ \] (.+)$/gim, '<li class="md-task"><span class="md-check">○</span> $1</li>');
+
+      // Unordered / ordered lists
+      s = s.replace(/^[\-\*\+] (.+)$/gm, '<li>$1</li>');
+      s = s.replace(/^\d+\. (.+)$/gm, '<li class="md-ol">$1</li>');
+      s = s.replace(/(?:<li class="md-task[\s\S]*?<\/li>\n?)+/g, (m) => '<ul class="md-tasks">' + m + '</ul>');
+      s = s.replace(/(?:<li class="md-ol">.*?<\/li>\n?)+/g, (m) => '<ol>' + m.replace(/ class="md-ol"/g, '') + '</ol>');
+      s = s.replace(/(?:<li>.*?<\/li>\n?)+/g, (m) => {
+        if (m.includes('md-task') || m.includes('<ol>')) return m;
+        return '<ul>' + m + '</ul>';
+      });
+
+      // Inline: images, links, bold, italic, strike, code
+      s = s.replace(/!\[([^\]]*)\]\((https?:[^)\s]+)\)/g, '<img class="md-img" src="$2" alt="$1" />');
+      s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+      s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+      s = s.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+      s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      s = s.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+      s = s.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
+      s = s.replace(/(?<!_)_([^_]+)_(?!_)/g, '<em>$1</em>');
+
+      // Paragraphs
+      s = s.split(/\n{2,}/).map((para) => {
+        const t = para.trim();
+        if (!t) return '';
+        if (/^<(h[1-6]|ul|ol|pre|blockquote|hr|table|img)/.test(t)) return para;
+        if (t.includes('<li')) return para;
+        if (t.startsWith('\u0000FENCE') || t.startsWith('\u0000TABLE')) return para;
+        return '<p>' + para.replace(/\n/g, '<br/>') + '</p>';
+      }).join('\n');
+
+      s = s.replace(/\u0000FENCE(\d+)\u0000/g, (_, i) => fences[+i] || '');
+      s = s.replace(/\u0000TABLE(\d+)\u0000/g, (_, i) => tables[+i] || '');
+      return s;
+    }
+
+    function notesTabLabel(n) {
+      const t = (n.title || '').trim();
+      if (t) return t.slice(0, 28);
+      const m = String(n.body || '').match(/^#\s+(.+)$/m);
+      if (m) return m[1].trim().slice(0, 28);
+      const line = String(n.body || '').trim().split('\n')[0] || 'Board';
+      return line.slice(0, 28) || 'Board';
+    }
+
+    function renderNotesTabs() {
+      const tabs = document.getElementById('notesBoardTabs');
+      if (!tabs) return;
+      const notes = ensureNotesSeed();
+      if (!_notesActiveId || !notes.some((n) => n.id === _notesActiveId)) {
+        _notesActiveId = notes[0].id;
+      }
+      tabs.innerHTML = notes.map((n) => {
+        const on = n.id === _notesActiveId ? ' active' : '';
+        return (
+          '<button type="button" class="notes-tab' + on + '" data-note-id="' + n.id + '" title="' + escapeHtml(notesTabLabel(n)) + '">' +
+            escapeHtml(notesTabLabel(n)) +
+            (notes.length > 1 ? '<span class="notes-tab-x" data-del-note="' + n.id + '" title="Close board">×</span>' : '') +
+          '</button>'
+        );
+      }).join('');
+      tabs.querySelectorAll('.notes-tab').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          if (e.target.classList.contains('notes-tab-x')) {
+            e.stopPropagation();
+            const id = e.target.getAttribute('data-del-note');
+            deleteNoteBoard(id);
+            return;
+          }
+          openNoteBoard(btn.getAttribute('data-note-id'));
+        });
+      });
+    }
+
+    function openNoteBoard(id) {
+      const notes = ensureNotesSeed();
+      const n = notes.find((x) => x.id === id) || notes[0];
+      if (!n) return;
+      _notesActiveId = n.id;
+      const body = document.getElementById('notesBody');
+      const prev = document.getElementById('notesPreview');
+      if (body) body.value = n.body || '';
+      if (prev) prev.innerHTML = renderMarkdownLite(n.body || '');
+      renderNotesTabs();
+      updateNotesStats();
+      const meta = document.getElementById('notesMeta');
+      if (meta) meta.textContent = 'autosave';
+    }
+
+    function persistActiveNote(fromInput) {
+      if (!_notesActiveId) return;
+      const notes = loadNotes();
+      const n = notes.find((x) => x.id === _notesActiveId);
+      if (!n) return;
+      const body = document.getElementById('notesBody');
+      const text = body ? body.value : (n.body || '');
+      n.body = text;
+      const m = text.match(/^#\s+(.+)$/m);
+      if (m) n.title = m[1].trim().slice(0, 48);
+      else if (!n.title) n.title = 'Board';
+      n.updatedAt = Date.now();
+      saveNotes(notes);
+      const prev = document.getElementById('notesPreview');
+      const split = document.getElementById('notesSplit');
+      const live = split && split.classList.contains('mode-live');
+      // Never re-render preview while typing in Live mode — kills the caret
+      if (prev && !(fromInput && live)) {
+        prev.innerHTML = renderMarkdownLite(text);
+      }
+      if (!fromInput) renderNotesTabs();
+      else {
+        // soft-update active tab label only
+        const tab = document.querySelector('.notes-tab.active');
+        if (tab) {
+          const x = tab.querySelector('.notes-tab-x');
+          tab.childNodes[0].textContent = notesTabLabel(n);
+          if (x) tab.appendChild(x);
+        }
+      }
+      const meta = document.getElementById('notesMeta');
+      if (meta) meta.textContent = 'saved';
+    }
+
+    function deleteNoteBoard(id) {
+      let notes = loadNotes();
+      if (notes.length <= 1) {
+        showToast('Keep at least one board');
+        return;
+      }
+      notes = notes.filter((x) => x.id !== id);
+      saveNotes(notes);
+      if (_notesActiveId === id) _notesActiveId = notes[0].id;
+      openNoteBoard(_notesActiveId);
+    }
+
+
+    function updateNotesStats() {
+      const body = document.getElementById('notesBody');
+      const el = document.getElementById('notesStats');
+      if (!body || !el) return;
+      const t = body.value || '';
+      const lines = t ? t.split('\n').length : 0;
+      const chars = t.length;
+      const words = (t.trim().match(/\S+/g) || []).length;
+      el.textContent = words + ' words · ' + chars + ' chars · ' + lines + ' lines';
+    }
+
+    function notesDownload(filename, content, mime) {
+      const blob = new Blob([content], { type: mime || 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    }
+
+    function notesSafeFilename() {
+      const notes = loadNotes();
+      const n = notes.find((x) => x.id === _notesActiveId);
+      const base = (n && (n.title || notesTabLabel(n))) || 'note';
+      return String(base).replace(/[^\w\-]+/g, '_').slice(0, 40) || 'note';
+    }
+
+
+    function notesHtmlToMarkdown(root) {
+      function walk(node) {
+        if (node.nodeType === 3) return node.nodeValue;
+        if (node.nodeType !== 1) return '';
+        const tag = node.tagName.toLowerCase();
+        const inner = [...node.childNodes].map(walk).join('');
+        if (tag === 'br') return '\n';
+        if (tag === 'strong' || tag === 'b') return '**' + inner + '**';
+        if (tag === 'em' || tag === 'i') return '*' + inner + '*';
+        if (tag === 'code' && node.parentElement && node.parentElement.tagName.toLowerCase() !== 'pre') return '`' + inner + '`';
+        if (tag === 'pre') return '\n```\n' + (node.textContent || '') + '\n```\n';
+        if (tag === 'h1') return '# ' + inner.trim() + '\n\n';
+        if (tag === 'h2') return '## ' + inner.trim() + '\n\n';
+        if (tag === 'h3') return '### ' + inner.trim() + '\n\n';
+        if (tag === 'h4') return '#### ' + inner.trim() + '\n\n';
+        if (tag === 'li') {
+          const parent = node.parentElement && node.parentElement.tagName.toLowerCase();
+          if (parent === 'ol') return '1. ' + inner.trim() + '\n';
+          return '- ' + inner.trim() + '\n';
+        }
+        if (tag === 'ul' || tag === 'ol') return inner + '\n';
+        if (tag === 'blockquote') return '> ' + inner.trim().replace(/\n/g, '\n> ') + '\n\n';
+        if (tag === 'p' || tag === 'div') {
+          // Preserve empty line breaks from contenteditable Enter
+          if (!String(inner).replace(/\u00a0/g, ' ').trim()) return '\n';
+          return String(inner).replace(/\u00a0/g, ' ').replace(/\s+$/,'') + '\n\n';
+        }
+        if (tag === 'a') return '[' + inner + '](' + (node.getAttribute('href') || '') + ')';
+        if (tag === 'hr') return '\n---\n\n';
+        if (tag === 'del' || tag === 's') return '~~' + inner + '~~';
+        if (tag === 'table') return (node.innerText || '').trim() + '\n\n';
+        return inner;
+      }
+      return walk(root).replace(/\n{3,}/g, '\n\n').trim() + '\n';
+    }
+
+    function setNotesViewMode(mode) {
+      const split = document.getElementById('notesSplit');
+      const panel = document.getElementById('notesPanel');
+      const prev = document.getElementById('notesPreview');
+      if (!split) return;
+      split.classList.remove('mode-editor', 'mode-preview', 'mode-focus', 'mode-live');
+      document.querySelectorAll('[data-notes-view]').forEach((b) => {
+        b.classList.toggle('active', b.getAttribute('data-notes-view') === mode);
+      });
+      if (mode === 'editor') split.classList.add('mode-editor');
+      else if (mode === 'preview') split.classList.add('mode-preview');
+      else if (mode === 'live') {
+        split.classList.add('mode-live');
+        const body = document.getElementById('notesBody');
+        if (prev && body) {
+          prev.innerHTML = renderMarkdownLite(body.value || '');
+          prev.setAttribute('contenteditable', 'false');
+          prev.setAttribute('aria-hidden', 'true');
+        }
+        if (body) {
+          body.removeAttribute('readonly');
+          try { body.focus(); } catch (e) {}
+        }
+      } else if (mode === 'focus') {
+        split.classList.add('mode-focus');
+        panel && panel.classList.add('notes-focus-mode');
+        document.body.classList.add('notes-focus-open');
+      }
+      if (mode !== 'focus') {
+        panel && panel.classList.remove('notes-focus-mode');
+        document.body.classList.remove('notes-focus-open');
+      }
+      if (prev) {
+        // Live no longer uses contenteditable — textarea is the editor
+        prev.setAttribute('contenteditable', 'false');
+        if (mode === 'live') prev.setAttribute('aria-hidden', 'true');
+        else prev.removeAttribute('aria-hidden');
+      }
+      try { localStorage.setItem('sqllix_notes_view', mode); } catch (e) {}
+    }
+
+    function bindNotesSplitResize() {
+      const split = document.getElementById('notesSplit');
+      const grip = document.getElementById('notesSplitter');
+      if (!split || !grip || grip.dataset.bound) return;
+      grip.dataset.bound = '1';
+      let dragging = false;
+      grip.addEventListener('mousedown', (e) => {
+        if (split.classList.contains('mode-editor') || split.classList.contains('mode-preview') || split.classList.contains('mode-focus')) return;
+        dragging = true;
+        grip.classList.add('is-dragging');
+        e.preventDefault();
+        const onMove = (ev) => {
+          if (!dragging) return;
+          const rect = split.getBoundingClientRect();
+          let ratio = (ev.clientX - rect.left) / rect.width;
+          ratio = Math.max(0.18, Math.min(0.82, ratio));
+          split.style.gridTemplateColumns = (ratio * 100) + '% 6px ' + ((1 - ratio) * 100) + '%';
+          try { localStorage.setItem('sqllix_notes_split', String(ratio)); } catch (err) {}
+        };
+        const onUp = () => {
+          dragging = false;
+          grip.classList.remove('is-dragging');
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+      try {
+        const saved = parseFloat(localStorage.getItem('sqllix_notes_split') || '');
+        if (saved >= 0.18 && saved <= 0.82) {
+          split.style.gridTemplateColumns = (saved * 100) + '% 6px ' + ((1 - saved) * 100) + '%';
+        }
+      } catch (e) {}
+    }
+
+    function bindNotesScrollSync() {
+      const ta = document.getElementById('notesBody');
+      const prev = document.getElementById('notesPreview');
+      const btn = document.getElementById('notesScrollSyncBtn');
+      if (!ta || !prev) return;
+      let sync = true;
+      try { sync = localStorage.getItem('sqllix_notes_sync') !== '0'; } catch (e) {}
+      if (btn) {
+        btn.setAttribute('aria-pressed', sync ? 'true' : 'false');
+        btn.addEventListener('click', () => {
+          sync = !sync;
+          btn.setAttribute('aria-pressed', sync ? 'true' : 'false');
+          try { localStorage.setItem('sqllix_notes_sync', sync ? '1' : '0'); } catch (e) {}
+        });
+      }
+      let lock = false;
+      const link = (from, to) => {
+        from.addEventListener('scroll', () => {
+          if (!sync || lock) return;
+          lock = true;
+          const maxF = from.scrollHeight - from.clientHeight;
+          const maxT = to.scrollHeight - to.clientHeight;
+          if (maxF > 0 && maxT > 0) to.scrollTop = (from.scrollTop / maxF) * maxT;
+          requestAnimationFrame(() => { lock = false; });
+        });
+      };
+      link(ta, prev);
+      link(prev, ta);
+    }
+
+
+
+    // ===== Command palette (Alt+J) =====
+    const CMD_STATIC = [
+      { id: 'panel:payload', label: 'Payload Workbench', keywords: 'payload pyload', group: 'panel', run: () => openVPanel('payload') },
+      { id: 'panel:history', label: 'History', keywords: 'history log', group: 'panel', run: () => openVPanel('history') },
+      { id: 'panel:tools', label: 'Tools', keywords: 'tools', group: 'panel', run: () => openVPanel('tools') },
+      { id: 'panel:settings', label: 'Settings', keywords: 'settings config', group: 'panel', run: () => openVPanel('settings') },
+      { id: 'panel:cheatsheet', label: 'Cheat Sheet', keywords: 'cheat sql', group: 'tool', run: () => openVPanel('cheatsheet') },
+      { id: 'panel:proxy', label: 'Proxy', keywords: 'proxy', group: 'tool', run: () => openVPanel('proxy') },
+      { id: 'panel:converter', label: 'Converter', keywords: 'converter encode decode', group: 'tool', run: () => openVPanel('converter') },
+      { id: 'panel:notes', label: 'Notes', keywords: 'notes markdown', group: 'tool', run: () => openVPanel('notes') },
+      { id: 'panel:payload-lib', label: 'Payload Library', keywords: 'library saved', group: 'tool', run: () => openVPanel('payload-lib') },
+      { id: 'panel:session', label: 'Session Manager', keywords: 'session storage', group: 'settings', run: () => {
+        openVPanel('settings');
+        if (typeof openSessionManager === 'function') openSessionManager();
+        else openVPanel('session-mgr');
+      }},
+      { id: 'panel:cookies', label: 'Cookie Manager', keywords: 'cookie cookies', group: 'settings', run: () => {
+        openVPanel('settings');
+        if (typeof openCookieManager === 'function') openCookieManager();
+      }},
+      { id: 'panel:attack-config', label: 'Attack Config', keywords: 'attack config stop', group: 'attack', run: () => openVPanel('attack-config') },
+      { id: 'panel:attack-combos', label: 'Attack Combos', keywords: 'combos attack', group: 'attack', run: () => openVPanel('attack-combos') },
+      { id: 'stab:headers', label: 'Settings → Headers', keywords: 'headers', group: 'settings', run: () => {
+        openVPanel('settings'); document.querySelector('.settings-tab[data-stab="headers"]')?.click();
+      }},
+      { id: 'stab:appearance', label: 'Settings → Appearance', keywords: 'appearance theme', group: 'settings', run: () => {
+        openVPanel('settings'); document.querySelector('.settings-tab[data-stab="appearance"]')?.click();
+      }},
+      { id: 'stab:night', label: 'Settings → Night Protect', keywords: 'night protect', group: 'settings', run: () => {
+        openVPanel('settings'); document.querySelector('.settings-tab[data-stab="night"]')?.click();
+      }},
+      { id: 'stab:general', label: 'Settings → General', keywords: 'general', group: 'settings', run: () => {
+        openVPanel('settings'); document.querySelector('.settings-tab[data-stab="general"]')?.click();
+      }},
+      { id: 'stab:shortcuts', label: 'Settings → Shortcuts', keywords: 'shortcuts keys', group: 'settings', run: () => {
+        openVPanel('settings'); document.querySelector('.settings-tab[data-stab="shortcuts"]')?.click();
+      }},
+    ];
+
+    let _cmdIdx = 0;
+    let _cmdMouse = { x: 80, y: 80 };
+    let _cmdHits = [];
+
+    function collectDomCmdEntries() {
+      const out = [];
+      const seen = new Set();
+      const pushBtn = (el, group) => {
+        if (!el || el.disabled || el.closest('#cmdPalette')) return;
+        const id = el.id ? ('btn:' + el.id) : ('btn:' + (el.className || '').toString().slice(0, 40) + ':' + (el.textContent || '').trim().slice(0, 24));
+        if (seen.has(id)) return;
+        const label = ((el.getAttribute('title') || '') + ' ' + (el.textContent || '')).replace(/\s+/g, ' ').trim();
+        if (!label || label.length < 2 || label.length > 80) return;
+        // skip pure icon-only close marks without title
+        if (/^[×x✕⊙↙↗▾▸+]+$/i.test(label) && !el.getAttribute('title')) return;
+        seen.add(id);
+        out.push({
+          id: id,
+          label: label.slice(0, 60),
+          keywords: label.toLowerCase(),
+          group: group || 'action',
+          run: () => {
+            try { el.click(); } catch (e) {}
+          },
+        });
+      };
+      document.querySelectorAll('button, [role="button"], .nav-tool, .night-protect-btn').forEach((el) => {
+        // skip hidden
+        if (el.offsetParent === null && el.id !== 'sendBtn') {
+          // still include important hidden-in-panel buttons by id
+          if (!el.id && !el.dataset.panel && !el.dataset.snip) return;
+        }
+        let group = 'action';
+        if (el.classList.contains('nav-tool') || el.dataset.panel) group = 'nav';
+        else if (el.closest('#settingsPanel')) group = 'settings';
+        else if (el.closest('#payloadWorkbench')) group = 'payload';
+        else if (el.closest('#historyPanel')) group = 'history';
+        else if (el.closest('#notesPanel')) group = 'notes';
+        else if (el.id === 'sendBtn' || /send/i.test(el.id || '') || /send/i.test(el.textContent || '')) group = 'action';
+        pushBtn(el, group);
+      });
+      return out;
+    }
+
+    function filterCmdEntries(q) {
+      try {
+        const s = String(q || '').trim().toLowerCase();
+        if (!s) return [];
+        let dom = [];
+        try { dom = collectDomCmdEntries() || []; } catch (err) { console.warn('[cmd] dom scan', err); }
+        const all = (typeof CMD_STATIC !== 'undefined' && Array.isArray(CMD_STATIC) ? CMD_STATIC : []).concat(dom);
+        const parts = s.split(/\s+/).filter(Boolean);
+        const scored = [];
+        for (let i = 0; i < all.length; i++) {
+          const e = all[i];
+          if (!e || !e.label) continue;
+          const hay = (e.label + ' ' + (e.keywords || '') + ' ' + (e.id || '') + ' ' + (e.group || '')).toLowerCase();
+          let ok = true;
+          for (let j = 0; j < parts.length; j++) {
+            if (hay.indexOf(parts[j]) < 0) { ok = false; break; }
+          }
+          if (!ok) continue;
+          scored.push({ e: e, score: hay.indexOf(parts[0]), len: e.label.length });
+        }
+        scored.sort((a, b) => a.score - b.score || a.len - b.len);
+        const seenL = {};
+        const out = [];
+        for (let i = 0; i < scored.length; i++) {
+          const k = scored[i].e.label.toLowerCase();
+          if (seenL[k]) continue;
+          seenL[k] = 1;
+          out.push(scored[i].e);
+          if (out.length >= 18) break;
+        }
+        return out;
+      } catch (err) {
+        console.warn('[cmd] filter', err);
+        return [];
+      }
+    }
+
+    function renderCmdList(q) {
+      const list = document.getElementById('cmdPaletteList');
+      if (!list) return;
+      _cmdHits = filterCmdEntries(q);
+      _cmdIdx = 0;
+      if (!(q || '').trim()) {
+        list.innerHTML = '<div class="cmd-palette-empty">Type to search panels &amp; buttons…</div>';
+        return;
+      }
+      if (!_cmdHits.length) {
+        list.innerHTML = '<div class="cmd-palette-empty">No matches</div>';
+        return;
+      }
+      list.innerHTML = _cmdHits.map((e, i) =>
+        '<button type="button" class="cmd-palette-item' + (i === 0 ? ' active' : '') + '" data-cmd-i="' + i + '" role="option">' +
+          '<span>' + escapeHtml(e.label) + '</span>' +
+          '<span class="cmd-kicker">' + escapeHtml(e.group) + '</span>' +
+        '</button>'
+      ).join('');
+      list.querySelectorAll('[data-cmd-i]').forEach((btn) => {
+        btn.addEventListener('mouseenter', () => {
+          _cmdIdx = +btn.getAttribute('data-cmd-i');
+          list.querySelectorAll('.cmd-palette-item').forEach((el, i) => el.classList.toggle('active', i === _cmdIdx));
+        });
+        btn.addEventListener('click', () => runCmdIndex(+btn.getAttribute('data-cmd-i')));
+      });
+    }
+
+    function runCmdIndex(i) {
+      const entry = _cmdHits[i];
+      closeCmdPalette();
+      if (!entry) return;
+      try { entry.run(); } catch (err) { console.warn('[cmd]', err); showToast('Could not run: ' + entry.label); }
+    }
+
+
+    function openCmdPalette(x, y) {
+      const root = document.getElementById('cmdPalette');
+      const input = document.getElementById('cmdPaletteInput');
+      if (!root || !input) {
+        console.warn('[cmd] palette DOM missing');
+        showToast('Command palette missing from page');
+        return;
+      }
+      const pad = 12;
+      const w = 360;
+      let left = typeof x === 'number' ? x : (_cmdMouse.x || 80);
+      let top = typeof y === 'number' ? y : (_cmdMouse.y || 80);
+      left = Math.max(pad, Math.min(left, window.innerWidth - w - pad));
+      top = Math.max(pad, Math.min(top, window.innerHeight - 220));
+      root.style.cssText = 'position:fixed;left:' + left + 'px;top:' + top + 'px;z-index:99999;display:block;pointer-events:auto;';
+      root.hidden = false;
+      root.removeAttribute('hidden');
+      input.value = '';
+      // ensure listeners even if init ran early
+      ensureCmdInputBound(input);
+      renderCmdList('');
+      setTimeout(() => {
+        input.focus();
+        input.select();
+      }, 30);
+    }
+
+    function closeCmdPalette() {
+      const root = document.getElementById('cmdPalette');
+      if (!root) return;
+      root.hidden = true;
+      root.setAttribute('hidden', '');
+      root.style.display = 'none';
+    }
+
+    function ensureCmdInputBound(input) {
+      if (!input || input.dataset.cmdBound === '1') return;
+      input.dataset.cmdBound = '1';
+      const onType = (e) => {
+        try {
+          renderCmdList(input.value);
+        } catch (err) {
+          console.warn('[cmd] render', err);
+          const list = document.getElementById('cmdPaletteList');
+          if (list) list.innerHTML = '<div class="cmd-palette-empty">Error: ' + String(err.message || err) + '</div>';
+        }
+      };
+      input.addEventListener('input', onType);
+      input.addEventListener('keyup', onType);
+      input.addEventListener('compositionend', onType);
+    }
+
+    function bindCommandPalette() {
+      // allow re-bind of DOM pieces; only one document key handler
+      if (!window.__sqliCmdKeyBound) {
+        window.__sqliCmdKeyBound = true;
+        document.addEventListener('mousemove', (e) => {
+          _cmdMouse.x = e.clientX;
+          _cmdMouse.y = e.clientY;
+        }, { passive: true });
+        document.addEventListener('keydown', (e) => {
+          // Alt+J (ignore when composing)
+          if (e.altKey && !e.ctrlKey && !e.metaKey && (e.key === 'j' || e.key === 'J' || e.code === 'KeyJ')) {
+            e.preventDefault();
+            e.stopPropagation();
+            const root = document.getElementById('cmdPalette');
+            if (root && !root.hidden && root.style.display !== 'none') closeCmdPalette();
+            else openCmdPalette(_cmdMouse.x + 8, _cmdMouse.y + 8);
+            return;
+          }
+          const root = document.getElementById('cmdPalette');
+          if (!root || root.hidden || root.style.display === 'none') return;
+          const list = document.getElementById('cmdPaletteList');
+          const items = list ? [...list.querySelectorAll('.cmd-palette-item')] : [];
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            closeCmdPalette();
+          } else if (e.key === 'ArrowDown' && items.length) {
+            e.preventDefault();
+            _cmdIdx = (_cmdIdx + 1) % items.length;
+            items.forEach((el, i) => el.classList.toggle('active', i === _cmdIdx));
+            items[_cmdIdx].scrollIntoView({ block: 'nearest' });
+          } else if (e.key === 'ArrowUp' && items.length) {
+            e.preventDefault();
+            _cmdIdx = (_cmdIdx - 1 + items.length) % items.length;
+            items.forEach((el, i) => el.classList.toggle('active', i === _cmdIdx));
+            items[_cmdIdx].scrollIntoView({ block: 'nearest' });
+          } else if (e.key === 'Enter' && items.length) {
+            e.preventDefault();
+            runCmdIndex(_cmdIdx);
+          }
+        }, true); // capture so we win over other handlers
+        document.addEventListener('mousedown', (e) => {
+          const root = document.getElementById('cmdPalette');
+          if (!root || root.hidden || root.style.display === 'none') return;
+          if (!root.contains(e.target)) closeCmdPalette();
+        }, true);
+      }
+      const cmdInput = document.getElementById('cmdPaletteInput');
+      ensureCmdInputBound(cmdInput);
+      window.__sqliCmdBound = true;
+    }
+
+
+    function renderPayloadHighlight() {
+      const ta = document.getElementById('payloadInput');
+      const pre = document.getElementById('payloadHighlight');
+      if (!ta || !pre) return;
+      const cs = window.getComputedStyle(ta);
+      pre.style.padding = cs.padding;
+      pre.style.font = cs.font;
+      pre.style.letterSpacing = cs.letterSpacing;
+      pre.style.lineHeight = cs.lineHeight;
+      pre.style.borderRadius = cs.borderRadius;
+      pre.style.boxSizing = 'border-box';
+      const raw = ta.value || '';
+      const html = raw.split('\n').map((line) => {
+        if (/^\s*#/.test(line)) {
+          return '<span class="payload-comment">' + escapeHtml(line.length ? line : ' ') + '</span>';
+        }
+        return escapeHtml(line.length ? line : ' ');
+      }).join('\n');
+      pre.innerHTML = html + (raw.endsWith('\n') ? '\n' : '');
+      pre.scrollTop = ta.scrollTop;
+      pre.scrollLeft = ta.scrollLeft;
+    }
+
+    function bindPayloadCommentHighlight() {
+      const ta = document.getElementById('payloadInput');
+      if (!ta || ta.dataset.hlBound === '1') return;
+      ta.dataset.hlBound = '1';
+      const wrap = ta.closest('.payload-input-wrap');
+      if (wrap) wrap.classList.add('has-hl');
+      const sync = () => renderPayloadHighlight();
+      ta.addEventListener('input', sync);
+      ta.addEventListener('scroll', () => {
+        const pre = document.getElementById('payloadHighlight');
+        if (!pre) return;
+        pre.scrollTop = ta.scrollTop;
+        pre.scrollLeft = ta.scrollLeft;
+      });
+      sync();
+    }
+
+    function bindNotesManager() {
+      if (window.__sqliNotesBound) return;
+      window.__sqliNotesBound = true;
+
+      ensureNotesSeed();
+      openNoteBoard(_notesActiveId || ensureNotesSeed()[0].id);
+
+      document.getElementById('notesAddBtn')?.addEventListener('click', () => {
+        const notes = loadNotes();
+        const id = 'n_' + Date.now().toString(36);
+        notes.unshift({
+          id: id,
+          title: 'Board',
+          body: '# New board\n\n',
+          updatedAt: Date.now(),
+          createdAt: Date.now(),
+        });
+        saveNotes(notes);
+        openNoteBoard(id);
+        document.getElementById('notesBody')?.focus();
+      });
+
+
+      // sticky clusters (Draw / Save / View) — fixed tray so View isn't clipped off-panel
+      document.querySelectorAll('.notes-cluster').forEach((cluster) => {
+        let leaveTimer = null;
+        const tray = cluster.querySelector('.notes-cluster-tray');
+        if (!tray) return;
+        // Park tray on body so float-center transform doesn't skew fixed coords
+        const home = cluster;
+        const placeTray = () => {
+          const r = cluster.getBoundingClientRect();
+          if (tray.parentElement !== document.body) document.body.appendChild(tray);
+          tray.classList.add('notes-tray-floating');
+          tray.style.position = 'fixed';
+          tray.style.zIndex = '100000';
+          tray.style.display = 'flex';
+          let left = r.right + 6;
+          let top = r.top + r.height / 2;
+          tray.style.left = left + 'px';
+          tray.style.top = top + 'px';
+          tray.style.transform = 'translateY(-50%)';
+          tray.style.right = 'auto';
+          requestAnimationFrame(() => {
+            const tr = tray.getBoundingClientRect();
+            if (tr.right > window.innerWidth - 6) {
+              tray.style.left = Math.max(8, window.innerWidth - tr.width - 8) + 'px';
+            }
+            if (tr.bottom > window.innerHeight - 6) {
+              tray.style.top = Math.max(8, window.innerHeight - tr.height - 8) + 'px';
+              tray.style.transform = 'none';
+            }
+          });
+        };
+        const close = () => {
+          cluster.classList.remove('is-open');
+          tray.style.display = 'none';
+          tray.classList.remove('notes-tray-floating');
+          if (tray.parentElement !== home) home.appendChild(tray);
+        };
+        const open = () => {
+          clearTimeout(leaveTimer);
+          document.querySelectorAll('.notes-cluster.is-open').forEach((c) => {
+            if (c !== cluster) {
+              c.classList.remove('is-open');
+              const t = c.querySelector('.notes-cluster-tray') || document.querySelector('.notes-tray-floating[data-owner="' + c.dataset.cluster + '"]');
+            }
+          });
+          // close other floating trays
+          document.querySelectorAll('.notes-tray-floating').forEach((t) => {
+            if (t !== tray) {
+              t.style.display = 'none';
+              t.classList.remove('notes-tray-floating');
+            }
+          });
+          cluster.classList.add('is-open');
+          tray.dataset.owner = cluster.dataset.cluster || '';
+          placeTray();
+        };
+        const scheduleClose = () => {
+          clearTimeout(leaveTimer);
+          leaveTimer = setTimeout(close, 240);
+        };
+        cluster.addEventListener('mouseenter', open);
+        cluster.addEventListener('mouseleave', scheduleClose);
+        tray.addEventListener('mouseenter', () => clearTimeout(leaveTimer));
+        tray.addEventListener('mouseleave', scheduleClose);
+        cluster.addEventListener('focusin', open);
+        cluster.addEventListener('focusout', scheduleClose);
+        cluster.querySelector('.notes-cluster-trigger')?.addEventListener('click', (e) => {
+          e.preventDefault();
+          if (cluster.classList.contains('is-open')) close();
+          else open();
+        });
+      });
+
+      // view modes + export + stats + split + sync
+      document.querySelectorAll('[data-notes-view]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          setNotesViewMode(btn.getAttribute('data-notes-view'));
+          btn.closest('.notes-cluster')?.classList.remove('is-open');
+        });
+      });
+
+      // Live mode: textarea is the editor (source of truth). Preview is a passive mirror underneath.
+      // Enter / caret work natively — never rewrite the textarea from HTML.
+      const notesPrev = document.getElementById('notesPreview');
+      const notesBodyEl = document.getElementById('notesBody');
+      if (notesBodyEl && !notesBodyEl.dataset.liveMirrorBound) {
+        notesBodyEl.dataset.liveMirrorBound = '1';
+        let liveTimer = null;
+        const syncLivePreview = (immediate) => {
+          const split = document.getElementById('notesSplit');
+          if (!split || !split.classList.contains('mode-live')) return;
+          const run = () => {
+            notesLiveCommit({ rerender: true });
+            // keep scroll in sync
+            const prev = document.getElementById('notesPreview');
+            if (prev) {
+              prev.scrollTop = notesBodyEl.scrollTop;
+              prev.scrollLeft = notesBodyEl.scrollLeft;
+            }
+          };
+          if (immediate) {
+            clearTimeout(liveTimer);
+            run();
+          } else {
+            clearTimeout(liveTimer);
+            liveTimer = setTimeout(run, 120);
+          }
+        };
+        notesBodyEl.addEventListener('input', () => syncLivePreview(false));
+        notesBodyEl.addEventListener('scroll', () => {
+          const split = document.getElementById('notesSplit');
+          if (!split || !split.classList.contains('mode-live')) return;
+          const prev = document.getElementById('notesPreview');
+          if (prev) {
+            prev.scrollTop = notesBodyEl.scrollTop;
+            prev.scrollLeft = notesBodyEl.scrollLeft;
+          }
+        });
+        // Enter needs no special handling — native textarea newline
+        notesBodyEl.addEventListener('keydown', (e) => {
+          const split = document.getElementById('notesSplit');
+          if (!split || !split.classList.contains('mode-live')) return;
+          if (e.key === 'Enter') {
+            // refresh preview quickly after the newline is applied
+            requestAnimationFrame(() => syncLivePreview(true));
+          }
+        });
+      }
+      // Disable any leftover contenteditable on preview
+      if (notesPrev) {
+        notesPrev.setAttribute('contenteditable', 'false');
+        notesPrev.removeAttribute('data-live-bound');
+      }
+
+      try {
+        const vm = localStorage.getItem('sqllix_notes_view') || 'split';
+        if (vm && vm !== 'focus') setNotesViewMode(vm);
+      } catch (e) {}
+      document.getElementById('notesExportMdBtn')?.addEventListener('click', () => {
+        const body = document.getElementById('notesBody');
+        notesDownload(notesSafeFilename() + '.md', (body && body.value) || '', 'text/markdown;charset=utf-8');
+        showToast('Exported .md', 'success');
+      });
+      document.getElementById('notesExportHtmlBtn')?.addEventListener('click', () => {
+        const prev = document.getElementById('notesPreview');
+        const title = notesSafeFilename();
+        const htmlDoc = '<!DOCTYPE html><html><head><meta charset="utf-8"/><title>' + escapeHtml(title) +
+          '</title><style>body{font-family:system-ui,sans-serif;max-width:820px;margin:32px auto;padding:0 16px;background:#0d1117;color:#e6edf3;line-height:1.6}pre{background:#161b22;padding:12px;border-radius:8px;overflow:auto}code{font-family:ui-monospace,monospace}table{border-collapse:collapse;width:100%}th,td{border:1px solid #30363d;padding:8px}a{color:#58c4ff}</style></head><body>' +
+          ((prev && prev.innerHTML) || '') + '</body></html>';
+        notesDownload(title + '.html', htmlDoc, 'text/html;charset=utf-8');
+        showToast('Exported .html', 'success');
+      });
+      document.getElementById('notesCopyMdBtn')?.addEventListener('click', async () => {
+        const body = document.getElementById('notesBody');
+        try {
+          await navigator.clipboard.writeText((body && body.value) || '');
+          showToast('Markdown copied', 'success');
+        } catch (e) { showToast('Copy failed'); }
+      });
+      document.getElementById('notesCopyHtmlBtn')?.addEventListener('click', async () => {
+        const prev = document.getElementById('notesPreview');
+        try {
+          await navigator.clipboard.writeText((prev && prev.innerHTML) || '');
+          showToast('HTML copied', 'success');
+        } catch (e) { showToast('Copy failed'); }
+      });
+      document.getElementById('notesPrintBtn')?.addEventListener('click', () => {
+        const prev = document.getElementById('notesPreview');
+        const w = window.open('', '_blank');
+        if (!w) { showToast('Popup blocked'); return; }
+        w.document.write('<!DOCTYPE html><html><head><title>Print note</title><style>body{font-family:system-ui,sans-serif;max-width:800px;margin:24px auto;line-height:1.55}pre{background:#f4f4f4;padding:10px;overflow:auto}</style></head><body>' + ((prev && prev.innerHTML) || '') + '</body></html>');
+        w.document.close();
+        setTimeout(() => { try { w.print(); } catch (e) {} }, 250);
+      });
+      bindNotesSplitResize();
+      bindNotesScrollSync();
+      // Esc exits focus
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.getElementById('notesPanel')?.classList.contains('notes-focus-mode')) {
+          setNotesViewMode('split');
+        }
+      });
+      // Ctrl/Cmd+B / I when focused in notes
+      document.getElementById('notesBody')?.addEventListener('keydown', (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        if (e.key === 'b' || e.key === 'B') { e.preventDefault(); notesInsertSnippet('bold'); }
+        else if (e.key === 'i' || e.key === 'I') { e.preventDefault(); notesInsertSnippet('italic'); }
+        else if (e.key === 's' || e.key === 'S') {
+          e.preventDefault();
+          persistActiveNote(false);
+          showToast('Saved', 'success');
+        }
+      });
+
+      // Delegation on document — Draw trays may be portaled to body
+      if (!window.__notesSnipDelegated) {
+        window.__notesSnipDelegated = true;
+        document.addEventListener('click', (e) => {
+          const btn = e.target && e.target.closest && e.target.closest('.notes-ins[data-snip], .notes-cluster-tray [data-snip], .notes-tray-floating [data-snip]');
+          if (!btn) return;
+          // only notes draw snippets (not random data-snip elsewhere)
+          if (!btn.classList.contains('notes-ins') && !btn.closest('.notes-cluster-tray') && !btn.closest('.notes-tray-floating')) return;
+          const key = btn.getAttribute('data-snip');
+          if (!key) return;
+          e.preventDefault();
+          notesInsertSnippet(key);
+          // close open clusters
+          document.querySelectorAll('.notes-cluster.is-open').forEach((c) => c.classList.remove('is-open'));
+          document.querySelectorAll('.notes-tray-floating').forEach((t) => {
+            t.style.display = 'none';
+            t.classList.remove('notes-tray-floating');
+          });
+        });
+      }
+
+      const body = document.getElementById('notesBody');
+      const slash = document.getElementById('notesSlashMenu');
+      let slashIdx = 0;
+      const hideSlash = () => { if (slash) slash.hidden = true; };
+      const insertSlashChoice = (id) => {
+        if (!body) return;
+        const pos = body.selectionStart;
+        const val = body.value;
+        const lineStart = val.lastIndexOf('\n', pos - 1) + 1;
+        const before = val.slice(lineStart, pos);
+        const m = before.match(/\/([\w-]*)$/);
+        if (m) {
+          const delFrom = pos - m[0].length;
+          body.value = val.slice(0, delFrom) + val.slice(pos);
+          body.setSelectionRange(delFrom, delFrom);
+        }
+        hideSlash();
+        notesInsertSnippet(id);
+      };
+      const showSlash = (filter) => {
+        if (!slash || !body) return;
+        const q = (filter || '').toLowerCase();
+        const items = NOTES_SLASH_ITEMS.filter((it) => !q || it.label.toLowerCase().includes(q) || it.id.includes(q));
+        if (!items.length) { hideSlash(); return; }
+        slashIdx = 0;
+        slash.innerHTML = items.map((it, i) =>
+          '<button type="button" class="notes-slash-item' + (i === 0 ? ' active' : '') + '" data-snip="' + it.id + '">' +
+            '<strong>' + escapeHtml(it.label) + '</strong><span>' + escapeHtml(it.hint) + '</span></button>'
+        ).join('');
+        slash.hidden = false;
+        // position near caret roughly under insert bar
+        slash.style.left = '12px';
+        slash.style.top = '88px';
+        slash.querySelectorAll('[data-snip]').forEach((b) => {
+          b.addEventListener('mousedown', (ev) => {
+            ev.preventDefault();
+            insertSlashChoice(b.getAttribute('data-snip'));
+          });
+        });
+      };
+      if (body) {
+        body.addEventListener('input', () => {
+          const prev = document.getElementById('notesPreview');
+          if (prev) prev.innerHTML = renderMarkdownLite(body.value);
+          const meta = document.getElementById('notesMeta');
+          if (meta) meta.textContent = 'editing…';
+          updateNotesStats();
+          clearTimeout(_notesSaveTimer);
+          _notesSaveTimer = setTimeout(() => persistActiveNote(true), 280);
+          const pos = body.selectionStart;
+          const lineStart = body.value.lastIndexOf('\n', pos - 1) + 1;
+          const before = body.value.slice(lineStart, pos);
+          const sm = before.match(/^\/([\w-]*)$/);
+          if (sm) showSlash(sm[1]);
+          else hideSlash();
+        });
+        body.addEventListener('keydown', (e) => {
+          if (!slash || slash.hidden) return;
+          const items = [...slash.querySelectorAll('.notes-slash-item')];
+          if (!items.length) return;
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            slashIdx = (slashIdx + 1) % items.length;
+            items.forEach((el, i) => el.classList.toggle('active', i === slashIdx));
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            slashIdx = (slashIdx - 1 + items.length) % items.length;
+            items.forEach((el, i) => el.classList.toggle('active', i === slashIdx));
+          } else if (e.key === 'Enter' || e.key === 'Tab') {
+            e.preventDefault();
+            const id = items[slashIdx] && items[slashIdx].getAttribute('data-snip');
+            if (id) insertSlashChoice(id);
+          } else if (e.key === 'Escape') hideSlash();
+        });
+        body.addEventListener('blur', () => setTimeout(hideSlash, 160));
+      }
+    }
+
     function init() {
       applyResetOnReloadIfNeeded();
       startBackendHealthLoop();
@@ -8689,6 +10027,9 @@ img, video, canvas { opacity: 0.9; }
       bindPanelPopoutButtons();
       bindPayloadToolsMenu();
       bindSelectionDecodeBar();
+      bindNotesManager();
+      bindPayloadCommentHighlight();
+      bindCommandPalette();
       bindSessionManagerUI();
       bindPayloadDraftSync();
       bindTargetUrlSync();

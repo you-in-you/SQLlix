@@ -182,8 +182,23 @@
       return results;
     }
 
+
+    /** Active payload lines: skip empty + comment lines starting with # */
+    function getPayloadLines(text) {
+      return String(text == null ? ((payloadInput && payloadInput.value) || '') : text)
+        .split('\n')
+        .map((l) => l.replace(/\s+$/, ''))
+        .filter((l) => {
+          const t = l.trim();
+          if (!t) return false;
+          // full-line comment: optional spaces then #
+          if (/^\s*#/.test(l)) return false;
+          return true;
+        });
+    }
+
     function expandAllPayloads() {
-      const lines = (payloadInput.value || '').split('\n').filter(l => l.trim() !== '');
+      const lines = getPayloadLines();
       if (lines.length === 0) return [];
       // If any line has braces → batch mode: expand each line, flatten
       const hasBrace = lines.some(l => /\{[^{}]+\}/.test(l));
@@ -195,6 +210,7 @@
       }
       return out;
     }
+
 
     /** $1, $2, … slots inside the payload textarea (nested variable attack). */
     function applyDollarMap(str, map) {
@@ -860,7 +876,7 @@
         const mapStr = Object.entries(row.map).map(([k, v]) => `$${k}=${escapeHtml(String(v))}`).join(' ');
         return `<div class="atk-combo-row" data-id="${row.id}">
           <div class="atk-combo-map">${mapStr}</div>
-          <div class="atk-combo-payload" title="${escapeHtml(row.payload || '')}">${escapeHtml((row.payload || '').slice(0, 80))}</div>
+          <div class="atk-combo-payload" title="${escapeHtml(row.payload || '')}">${escapeHtml(row.payload || '')}</div>
           <button type="button" class="btn btn-sm btn-ghost atk-combo-edit" data-id="${row.id}">Edit</button>
           <button type="button" class="btn btn-sm btn-ghost atk-combo-del" data-id="${row.id}">✕</button>
         </div>`;
@@ -1072,7 +1088,7 @@
           if (attackPreview) attackPreview.innerHTML = '';
         } else {
           renderDollarSlotsUI([]);
-          if (hint) hint.textContent = 'Brace expansion mode — each {…} list becomes a payload.';
+          if (hint) hint.textContent = 'Brace expansion mode — each {…} list becomes a payload. Use Attack panel Stop conditions to halt the batch.';
           if (attackExpandCount) attackExpandCount.textContent = `${payloads.length} payloads`;
           if (attackPreview) {
             const preview = payloads.slice(0, 12).map(p => `<span>${escapeHtml(p.text.slice(0, 40))}</span>`).join('');
@@ -1146,7 +1162,7 @@
     // ===== Send / Attack =====
     function applyPayloadPlaceholders(str, linesOverride) {
       if (!str || !str.includes('$')) return str;
-      const lines = linesOverride || (payloadInput.value || '').split('\n');
+      const lines = linesOverride || getPayloadLines();
       return str.replace(/\$(\d+)/g, (match, num) => {
         const idx = parseInt(num, 10) - 1;
         if (idx >= 0 && idx < lines.length) return lines[idx];
@@ -1159,7 +1175,7 @@
       // $2+ → other lines from the payload workbench (if any)
       if (!str) return str;
       const text = payloadText == null ? '' : String(payloadText);
-      const lines = (payloadInput && payloadInput.value || '').split('\n');
+      const lines = getPayloadLines();
       return String(str).replace(/\$(\d+)/g, (match, num) => {
         const idx = parseInt(num, 10) - 1;
         if (idx === 0) return text;
@@ -1746,6 +1762,9 @@
     window.expandAllPayloads = expandAllPayloads;
     window.applyDollarMap = applyDollarMap;
     window.detectDollarSlots = detectDollarSlots;
+    window.getPayloadLines = getPayloadLines;
+    window.expandScopeSegment = expandScopeSegment;
+    window.applyDollarMap = applyDollarMap;
     window.estimateDollarCombos = estimateDollarCombos;
     window.promptAttackMeta = promptAttackMeta;
     window.setAttackControls = setAttackControls;
